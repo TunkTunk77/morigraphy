@@ -9,9 +9,9 @@
   /* Lấy dữ liệu mới nhất từ server (admin chỉnh). Không có server → dùng js/data.js */
   let HAS_API = false;
   try {
-    const r = await fetch("/api/data", { cache: "no-store" });
-    if (r.ok) {
-      const d = await r.json();
+    // index.html đã bắt đầu tải sẵn từ <head>; không có thì tự tải
+    const d = await (window.__MG_DATA || fetch("/api/data", { cache: "no-store" }).then(r => r.ok ? r.json() : null));
+    if (d) {
       Object.assign(window, { HERO: d.hero || window.HERO, SECTIONS: d.sections || {}, STUDIO: d.studio, CATEGORIES: d.categories, SERVICES: d.services, PHOTOGRAPHERS: d.photographers, ADDONS: d.addons,
         PRODUCTS: d.products, TRAVEL_ZONES: d.zones, SHIFTS: d.shifts || window.SHIFTS, BOOKING_WINDOW_DAYS: d.bookingWindowDays });
       HAS_API = true;
@@ -170,7 +170,12 @@
     $("#servicesGrid").innerHTML = list.map(s => {
       const no = pad(SERVICES.indexOf(s) + 1);
       return `<article class="card" data-card>
-        <div class="card-media ph ph-${s.tone}"><span class="card-tag">HỒ SƠ #${no} · ${s.category.toUpperCase()}</span></div>
+        <div class="card-media folder-media" style="--f: var(--tone-${s.tone || "stone"})" aria-hidden="true">
+          <span class="fm-back"></span>
+          <span class="fm-paper fm-p2"></span>
+          <span class="fm-paper fm-p1"><b>#${no}</b></span>
+          <span class="fm-front"><span class="card-tag">HỒ SƠ #${no} · ${s.category.toUpperCase()}</span></span>
+        </div>
         <div class="card-body">
           <h3>${s.name}</h3>
           <p class="card-desc">${s.desc}</p>

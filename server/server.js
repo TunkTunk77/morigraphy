@@ -12,6 +12,7 @@ const fsp = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const vm = require("node:vm");
+const zlib = require("node:zlib");
 
 const ROOT = path.resolve(__dirname, "..");
 const DATA_DIR = process.env.MG_DATA_DIR ? path.resolve(process.env.MG_DATA_DIR) : path.join(ROOT, "data");
@@ -329,8 +330,14 @@ function noteFail(ip) { const f = loginFails.get(ip); const now = Date.now(); if
 const SEC_HEADERS = { "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY" };
 function send(res, status, body, headers = {}) {
   const isObj = typeof body === "object" && !Buffer.isBuffer(body);
-  res.writeHead(status, { ...SEC_HEADERS, "Content-Type": isObj ? "application/json; charset=utf-8" : "text/plain; charset=utf-8", "Cache-Control": "no-store", ...headers });
-  res.end(isObj ? JSON.stringify(body) : body);
+  let out = isObj ? Buffer.from(JSON.stringify(body), "utf8") : body;
+  const h = { ...SEC_HEADERS, "Content-Type": isObj ? "application/json; charset=utf-8" : "text/plain; charset=utf-8", "Cache-Control": "no-store", ...headers };
+  // JSON lớn (VD /api/data) → nén gzip nhanh, nhẹ hơn ~4 lần trên mạng điện thoại
+  if (isObj && out.length > 1500 && res.req && /\bgzip\b/.test(String(res.req.headers["accept-encoding"] || ""))) {
+    out = zlib.gzipSync(out, { level: 6 }); h["Content-Encoding"] = "gzip"; h.Vary = "Accept-Encoding";
+  }
+  res.writeHead(status, h);
+  res.end(out);
 }
 function readBody(req, limit = 1_000_000) {
   return new Promise((resolve, reject) => {
@@ -341,7 +348,53 @@ function readBody(req, limit = 1_000_000) {
 // Chống CSRF: request ghi dữ liệu phải đến từ cùng origin
 function sameOrigin(req) { const o = req.headers.origin; if (!o) return true; try { return new URL(o).host === req.headers.host; } catch { return false; } }
 
-async function serveStatic(req, res, pathname) {
+/* ---------------- Tệp tĩnh: nén sẵn + nhớ đệm ----------------
+   - Nén brotli/gzip một lần rồi giữ trong RAM (tự làm mới khi file đổi)
+   - ETag → trình duyệt hỏi lại chỉ nhận 304, không tải lại
+   - HTML được gắn ?v=<mã> vào css/js/ảnh → các file đó cache 1 năm, sửa file là mã đổi */
+const COMPRESSIBLE = /\.(html|css|js|json|svg|ico)$/i;
+const fileCache = new Map(); // đường dẫn → { mtimeMs, size, raw, gz, br, etag }
+function compressAll(raw) {
+  return {
+    gz: zlib.gzipSync(raw, { level: 9 }),
+    br: zlib.brotliCompressSync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: raw.length } }),
+  };
+}
+async function loadFile(file) {
+  let st;
+  try { st = await fsp.stat(file); } catch (e) { fileCache.delete(file); throw e; }
+  if (!st.isFile()) throw new Error("not file");
+  const isHtml = /\.html$/i.test(file);
+  const hit = fileCache.get(file);
+  // HTML phụ thuộc mã phiên bản của css/js → luôn dựng lại phần link (rẻ), chỉ nén lại khi kết quả khác
+  if (hit && !isHtml && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit;
+  let raw = await fsp.readFile(file);
+  if (isHtml) { raw = Buffer.from(await versionLinks(raw.toString("utf8")), "utf8"); if (hit && hit.raw.equals(raw)) return hit; }
+  const entry = { mtimeMs: st.mtimeMs, size: st.size, raw, etag: '"' + crypto.createHash("sha1").update(raw).digest("base64url").slice(0, 16) + '"' };
+  if (COMPRESSIBLE.test(file) && raw.length > 1024) Object.assign(entry, compressAll(raw));
+  fileCache.set(file, entry);
+  return entry;
+}
+// Gắn ?v=<etag> cho css/…, js/…, assets/… trong HTML (giữ nguyên link ngoài)
+async function versionLinks(html) {
+  const refs = new Set(); html.replace(/\b(?:src|href|srcset)="((?:css|js|assets)\/[^"?#\s]+)"/g, (_, p) => refs.add(p));
+  const ver = {};
+  for (const p of refs) { try { ver[p] = (await loadFile(path.resolve(ROOT, p))).etag.slice(1, 9); } catch { /* file thiếu: để nguyên */ } }
+  return html.replace(/\b(src|href|srcset)="((?:css|js|assets)\/[^"?#\s]+)"/g, (m, a, p) => ver[p] ? `${a}="${p}?v=${ver[p]}"` : m);
+}
+function sendFile(req, res, entry, type, cacheControl) {
+  const headers = { ...SEC_HEADERS, "Content-Type": type, "Cache-Control": cacheControl, ETag: entry.etag, Vary: "Accept-Encoding" };
+  if (req.headers["if-none-match"] === entry.etag) { res.writeHead(304, headers); return res.end(); }
+  const ae = String(req.headers["accept-encoding"] || "");
+  let body = entry.raw;
+  if (entry.br && /\bbr\b/.test(ae)) { body = entry.br; headers["Content-Encoding"] = "br"; }
+  else if (entry.gz && /\bgzip\b/.test(ae)) { body = entry.gz; headers["Content-Encoding"] = "gzip"; }
+  headers["Content-Length"] = body.length;
+  res.writeHead(200, headers);
+  res.end(req.method === "HEAD" ? undefined : body);
+}
+
+async function serveStatic(req, res, pathname, versioned = false) {
   let rel = decodeURIComponent(pathname).replace(/^\/+/, "");
   if (rel === "" ) rel = "index.html";
   if (rel === "admin") rel = "admin.html";
@@ -349,17 +402,18 @@ async function serveStatic(req, res, pathname) {
   // Ảnh tải lên: /uploads/<tên-ngẫu-nhiên>.<đuôi> → data/uploads/
   if (top === "uploads") {
     const m = /^uploads\/([a-f0-9]{24}\.(webp|jpg|png))$/.exec(rel); if (!m) return send(res, 404, "Not found");
-    try { const data = await fsp.readFile(path.join(UPLOAD_DIR, m[1]));
-      res.writeHead(200, { ...SEC_HEADERS, "Content-Type": MIME["." + m[2]], "Cache-Control": "public, max-age=31536000, immutable" }); return res.end(data);
+    try { const entry = await loadFile(path.join(UPLOAD_DIR, m[1]));
+      return sendFile(req, res, entry, MIME["." + m[2]], "public, max-age=31536000, immutable");
     } catch { return send(res, 404, "Not found"); }
   }
   if (!(PUBLIC_FILES.includes(rel) || PUBLIC_DIRS.includes(top))) return send(res, 404, "Not found");
   const file = path.resolve(ROOT, rel);
   if (!file.startsWith(ROOT + path.sep)) return send(res, 403, "Forbidden");
   try {
-    const data = await fsp.readFile(file);
-    res.writeHead(200, { ...SEC_HEADERS, "Content-Type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream", "Cache-Control": rel.startsWith("assets/") ? "public, max-age=86400" : "no-cache" });
-    res.end(data);
+    const entry = await loadFile(file);
+    // Link có ?v= (do HTML gắn) → cache 1 năm; HTML và link không có mã → hỏi lại mỗi lần (rẻ nhờ ETag/304)
+    const cc = versioned && !rel.endsWith(".html") ? "public, max-age=31536000, immutable" : rel.startsWith("assets/") ? "public, max-age=86400" : "no-cache";
+    sendFile(req, res, entry, MIME[path.extname(file).toLowerCase()] || "application/octet-stream", cc);
   } catch { send(res, 404, "Not found"); }
 }
 
@@ -577,7 +631,7 @@ async function main() {
     const url = new URL(req.url, "http://x");
     try {
       if (url.pathname.startsWith("/api/")) await api(req, res, url);
-      else if (req.method === "GET" || req.method === "HEAD") await serveStatic(req, res, url.pathname);
+      else if (req.method === "GET" || req.method === "HEAD") await serveStatic(req, res, url.pathname, url.searchParams.has("v"));
       else send(res, 405, "Method not allowed");
     } catch (e) {
       if (e instanceof Invalid) send(res, e instanceof TooLarge ? 413 : 400, { error: e.message });

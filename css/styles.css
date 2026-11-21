@@ -155,6 +155,22 @@ main { min-height: 70vh; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; display: flex; flex-direction: column; box-shadow: var(--shadow-card); transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
 .card:hover { transform: translateY(-4px); box-shadow: var(--shadow-pop); }
 .card-media { aspect-ratio: 16 / 9; }
+/* Gói chụp: tập hồ sơ — rê chuột thì giấy bên trong nhô lên, nắp trước hé ra */
+.folder-media { position: relative; overflow: hidden; background: var(--alt); }
+.folder-media .fm-back { position: absolute; left: 9%; right: 9%; top: 24%; bottom: -8%; border-radius: 6px 12px 0 0; background: linear-gradient(rgba(21,34,59,.18), rgba(21,34,59,.18)), var(--f); }
+.folder-media .fm-back::before { content: ""; position: absolute; left: 0; top: -16px; width: 36%; height: 20px; border-radius: 10px 10px 0 0; background: inherit; }
+.folder-media .fm-paper { position: absolute; top: 30%; bottom: 0; border-radius: 6px; background: #FFFCF5; box-shadow: 0 2px 8px rgba(21,34,59,.12); transition: transform .5s cubic-bezier(.34,1.4,.64,1); }
+.folder-media .fm-p2 { left: 20%; right: 14%; transform: rotate(2deg); background: #F4EBDA; }
+.folder-media .fm-p1 { left: 15%; right: 19%; transform: rotate(-1.5deg);
+  background: repeating-linear-gradient(transparent 0 13px, rgba(21,34,59,.10) 13px 14px) 0 34px / 100% calc(100% - 34px) no-repeat, #FFFCF5; }
+.folder-media .fm-p1::before { content: ""; position: absolute; right: 12px; top: 10px; width: 26%; aspect-ratio: 4 / 3; border-radius: 4px; background: var(--f); opacity: .55; }
+.folder-media .fm-p1 b { position: absolute; left: 12px; top: 8px; font: 800 15px var(--font-mono); color: var(--accent); }
+.folder-media .fm-front { position: absolute; left: 7%; right: 7%; bottom: -6%; height: 56%; border-radius: 12px 12px 0 0; background: var(--f); box-shadow: 0 -6px 14px rgba(21,34,59,.12); transform-origin: 50% 100%; transition: transform .45s var(--ease); overflow: hidden; }
+.folder-media .fm-front::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(135deg, rgba(255,255,255,.10) 0 10px, transparent 10px 20px); pointer-events: none; }
+.folder-media .card-tag { top: 14px; left: 14px; }
+.card:hover .fm-p1, .card:focus-within .fm-p1 { transform: translateY(-30%) rotate(-4deg); }
+.card:hover .fm-p2, .card:focus-within .fm-p2 { transform: translateY(-18%) rotate(5deg); transition-delay: .05s; }
+.card:hover .fm-front, .card:focus-within .fm-front { transform: perspective(700px) rotateX(-18deg); }
 .card-tag { position: absolute; top: 14px; left: 14px; z-index: 1; font: 600 11px var(--font-mono); letter-spacing: .08em; background: var(--surface); color: var(--ink); padding: 5px 10px; border-radius: 6px; }
 .card-body { padding: 22px 24px 24px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
 .card-body h3 { font-size: 24px; }
