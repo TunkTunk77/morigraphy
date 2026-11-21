@@ -379,7 +379,7 @@
 
   async function goTo(n, { scroll = false, focus = true } = {}) {
     n = clampStep(n);
-    if (scroll) document.getElementById("booking").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+    if (scroll) openPage("booking");
     if (M.stepOut) await M.stepOut(view);
     state.step = n; if (typeof n === "number") state.maxStep = Math.max(state.maxStep, n);
     if (n === 3) await loadBusy(); // lịch luôn mới khi vào bước chọn giờ
@@ -746,9 +746,14 @@
     if (t.id === "brandLink") {
       e.preventDefault();
       $("#nav").classList.remove("is-open"); $("#navToggle").setAttribute("aria-expanded", "false");
-      window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-      history.replaceState(null, "", location.pathname + location.search);
+      openPage("home");
+      return;
     }
+    // "Lên đầu trang" ở chân trang: chỉ cuộn lên, giữ nguyên trang đang xem
+    if (t.getAttribute("href") === "#top") { e.preventDefault(); window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); return; }
+    // Bấm lại đúng trang đang mở: cuộn về đầu trang đó
+    const href = t.getAttribute("href");
+    if (href && href.startsWith("#") && href === location.hash) { e.preventDefault(); window.scrollTo({ top: 0 }); }
   });
 
   view.addEventListener("change", e => {
@@ -791,5 +796,36 @@
   state.step = clampStep(typeof state.step === "number" ? state.step : 1);
   state.maxStep = Math.max(state.step, Math.min(state.maxStep || 1, clampStep(5)));
   renderStep(); refreshSummary();
+
+  /* ---------------- Mỗi mục menu là một trang riêng ----------------
+     Trang chủ = ảnh bìa + dải kêu gọi; các trang khác chỉ hiện đúng phần đó.
+     Địa chỉ vẫn là #services, #team… nên nút quay lại của trình duyệt dùng được. */
+  const PAGES = ["services", "team", "extras", "travel", "booking", "contact"];
+  const CTA_ON = ["home", "services", "team", "extras", "travel"];
+  const pageOf = () => { const id = decodeURIComponent(location.hash.slice(1)); return PAGES.includes(id) ? id : "home"; };
+  let curPage = null;
+  function route() {
+    const page = pageOf();
+    if (page === curPage) return; // hashchange và popstate có thể cùng bắn
+    curPage = page;
+    const shown = [];
+    $$("main > section").forEach(s => {
+      const key = s.classList.contains("hero") ? "home" : s.classList.contains("cta-band") ? "cta" : s.id;
+      const on = key === "cta" ? CTA_ON.includes(page) : key === page;
+      s.hidden = !on; if (on) shown.push(s);
+    });
+    $$("#nav a").forEach(a => { if (a.getAttribute("href") === "#" + page) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+    window.scrollTo({ top: 0, behavior: "instant" }); // sang trang mới: lên đầu ngay, không cuộn mượt
+    if (window.gsap && M.enabled) gsap.fromTo(shown, { autoAlpha: 0, y: 12 }, { autoAlpha: 1, y: 0, duration: 0.4, clearProps: "transform,opacity,visibility" });
+    if (window.ScrollTrigger) ScrollTrigger.refresh();
+  }
+  function openPage(page) {
+    if (page === "home") { if (location.hash) { history.pushState(null, "", location.pathname + location.search); route(); } else window.scrollTo(0, 0); }
+    else if (location.hash !== "#" + page) location.hash = page; // hashchange → route()
+    else window.scrollTo(0, 0);
+  }
+  window.addEventListener("hashchange", route);
+  window.addEventListener("popstate", route);
+  route();
   if (M.init) M.init();
 })();
