@@ -1,5 +1,6 @@
 # Dữ liệu chạy thật — không đưa lên git
 data/admin.json
+data/payhook.json
 data/bookings.json
 data/*.tmp
 data/*.backup-*.json

@@ -13,6 +13,7 @@
   const DAYS = [[1, "T2"], [2, "T3"], [3, "T4"], [4, "T5"], [5, "T6"], [6, "T7"], [0, "CN"]];
   const PF_MAX = 30;
   const STATUS = { new: "Mới", confirmed: "Đã xác nhận", deposited: "Đã cọc", done: "Hoàn tất", cancelled: "Đã hủy" };
+  const SHIFT_NAMES = { full: "Cả ngày", morning: "Buổi sáng", afternoon: "Buổi chiều" }; // đơn cũ vẫn hiện giờ "09:00"
 
   async function api(path, opts = {}) {
     const r = await fetch(path, { credentials: "same-origin", ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) } });
@@ -103,15 +104,15 @@
 
   /* ---------------- Cấu hình form theo nhóm dữ liệu ---------------- */
   const COLLECTIONS = {
-    services: { title: "Gói chụp", intro: "Giá, thời lượng và nội dung các gói. Thời lượng dùng để kiểm tra khung giờ trống.", prefix: "sv",
+    services: { title: "Gói chụp", intro: "Giá, thời lượng và nội dung các gói. Gói dài hơn nửa buổi thì khách chỉ chọn được “Cả ngày”.", prefix: "sv",
       blank: () => ({ name: "Gói mới", category: "Cá nhân", duration: 60, price: 1000000, tone: "stone", desc: "", includes: [] }),
       side: x => money(x.price), sub: x => `${x.category} · ${x.duration} phút`,
       fields: [["name", "Tên gói", "text"], ["category", "Danh mục", "text"], ["tone", "Màu ảnh giữ chỗ", "tone"], ["price", "Giá (đ)", "money"], ["duration", "Thời lượng (phút)", "number"],
         ["desc", "Mô tả ngắn", "textarea", "full"], ["includes", "Bao gồm (mỗi dòng một ý)", "lines", "full"]] },
     photographers: { title: "Thám tử ảnh", intro: "Thông tin thợ, ngày làm việc, các gói nhận chụp và phụ phí khi khách chọn đích danh.", prefix: "ph",
-      blank: () => ({ name: "Thám tử mới", role: "Thám tử", years: 1, rating: 5, reviews: 0, surcharge: 0, tone: "stone", specialties: [], style: "", bio: "", workDays: [1, 2, 3, 4, 5, 6], services: [], avatar: "", portfolio: [] }),
-      side: x => (x.surcharge ? "+" + money(x.surcharge) : "Không phụ phí"), sub: x => `${x.role} · ${x.years} năm · ★ ${x.rating} · ${(x.portfolio || []).length} ảnh portfolio${x.payment && x.payment.enabled ? " · có TK nhận cọc riêng" : ""}`,
-      fields: [["avatar", "Ảnh đại diện", "image"], ["name", "Họ tên", "text"], ["role", "Chức danh", "text"], ["years", "Số năm kinh nghiệm", "number"], ["rating", "Điểm đánh giá (0–5)", "decimal"], ["reviews", "Số đánh giá", "number"],
+      blank: () => ({ name: "Thám tử mới", phone: "", role: "Thám tử", years: 1, rating: 5, reviews: 0, surcharge: 0, tone: "stone", specialties: [], style: "", bio: "", workDays: [1, 2, 3, 4, 5, 6], services: [], avatar: "", portfolio: [] }),
+      side: x => (x.surcharge ? "+" + money(x.surcharge) : "Không phụ phí"), sub: x => `${x.role}${x.phone ? " · " + x.phone : ""} · ${x.years} năm · ★ ${x.rating} · ${(x.portfolio || []).length} ảnh portfolio${x.payment && x.payment.enabled ? " · có TK nhận cọc riêng" : ""}`,
+      fields: [["avatar", "Ảnh đại diện", "image"], ["name", "Họ tên", "text"], ["phone", "Số điện thoại / Zalo riêng", "text"], ["role", "Chức danh", "text"], ["years", "Số năm kinh nghiệm", "number"], ["rating", "Điểm đánh giá (0–5)", "decimal"], ["reviews", "Số đánh giá", "number"],
         ["surcharge", "Phụ phí chọn đích danh (đ)", "money"], ["tone", "Màu dự phòng (khi chưa có ảnh)", "tone"], ["specialties", "Chuyên môn (mỗi dòng một ý)", "lines"], ["workDays", "Ngày làm việc", "days", "full"], ["services", "Nhận chụp các gói", "services", "full"],
         ["style", "Phong cách", "textarea", "full"], ["bio", "Giới thiệu", "textarea", "full"], ["portfolio", "Portfolio — ảnh thám tử đã chụp", "portfolio", "full"], ["payment", "Tài khoản nhận cọc riêng", "bank", "full"]] },
     addons: { title: "Dịch vụ đi kèm", intro: "Khách chọn số lượng ở bước 4. “Thêm phút” cộng vào thời lượng buổi chụp.", prefix: "ad",
@@ -220,13 +221,35 @@
         ${input("studio.area", "Khu vực hoạt động", "text", s.area, "half")}${input("studio.openHours", "Giờ nhận lịch", "text", s.openHours)}
         ${input("studio.facebook", "Link Facebook (https://…)", "text", s.facebook)}${input("studio.instagram", "Link Instagram (https://…)", "text", s.instagram)}${input("studio.tagline", "Khẩu hiệu", "text", s.tagline)}${input("studio.depositPercent", "% đặt cọc", "number", s.depositPercent)}
       </div></div>
-      <div class="page-head" style="margin-top:28px"><div><h1 style="font-size:24px">Lịch nhận khách</h1><p>Khung giờ bắt đầu mỗi tiếng. Bỏ một giờ để tạo giờ nghỉ (VD: không có 12:00 = nghỉ trưa).</p></div></div>
+      <div class="page-head" style="margin-top:28px"><div><h1 style="font-size:24px">Lịch nhận khách</h1><p>Khách chọn <b>Cả ngày</b>, <b>Buổi sáng</b> hoặc <b>Buổi chiều</b>. Cả ngày = từ đầu buổi sáng đến hết buổi chiều. Chụp đi tỉnh chỉ nhận cả ngày.</p></div></div>
       <div class="panel"><div class="form-grid">
-        <div class="field half"><label for="slotsInput">Khung giờ (cách nhau bằng dấu phẩy)</label><input id="slotsInput" data-path="timeSlots" data-type="slots" value="${esc(draft.timeSlots.join(", "))}" /><span class="hint">VD: 08:00, 09:00, 10:00, 13:00, 14:00</span></div>
+        ${["morning", "afternoon"].map(k => { const l = k === "morning" ? "Buổi sáng" : "Buổi chiều", v = (draft.shifts || {})[k] || {};
+          return `<div class="field"><label for="sh-${k}-s">${l}: bắt đầu</label><input id="sh-${k}-s" type="time" step="900" data-path="shifts.${k}.start" data-type="text" value="${esc(v.start || "")}" /></div>
+            <div class="field"><label for="sh-${k}-e">${l}: kết thúc</label><input id="sh-${k}-e" type="time" step="900" data-path="shifts.${k}.end" data-type="text" value="${esc(v.end || "")}" /></div>`; }).join("")}
         ${input("bookingWindowDays", "Mở lịch trước tối đa (ngày)", "number", draft.bookingWindowDays)}
       </div></div>
-      ${paymentPanel()}`;
+      ${paymentPanel()}
+      <div class="page-head" style="margin-top:28px"><div><h1 style="font-size:24px">Tự động xác nhận cọc (SePay)</h1>
+        <p>Khi khách chuyển khoản đúng nội dung, đơn tự chuyển sang <b>Đã cọc</b> và khách thấy ngay nút nhắn Zalo/Messenger với team. Cần web đã chạy public có tên miền HTTPS.</p></div></div>
+      <div class="panel" id="payhookPanel"><p class="hint">Đang tải…</p></div>`;
+    loadPayhook();
     updatePayPreview();
+  }
+
+  /* ---------------- Webhook SePay (khóa lưu riêng ở server, không nằm trong dữ liệu trang) ---------------- */
+  async function loadPayhook(next) {
+    const box = document.getElementById("payhookPanel"); if (!box) return;
+    let h; try { h = next || await api("/api/admin/payhook"); } catch (e) { box.innerHTML = `<p class="hint">${esc(e.message)}</p>`; return; }
+    const url = location.origin + "/api/webhooks/sepay", on = !!h.apiKey;
+    const row = (label, val) => `<div class="field full"><label>${label}</label><div style="display:flex;gap:8px"><input type="text" readonly value="${esc(val)}" style="font-family:var(--font-mono)" /><button type="button" class="btn btn-ghost btn-sm" data-copy-text="${esc(val)}">Sao chép</button></div></div>`;
+    box.innerHTML = on ? `<div class="form-grid">${row("URL nhận webhook (dán vào SePay)", url)}${row("API Key (SePay → Kiểu chứng thực: API Key)", h.apiKey)}</div>
+        <ol class="hint" style="margin:12px 0 0;padding-left:18px;line-height:1.7">
+          <li>Đăng ký <b>sepay.vn</b>, liên kết tài khoản ngân hàng nhận cọc (team và thám tử có TK riêng).</li>
+          <li>Vào <b>Tích hợp WebHooks → Thêm webhook</b>: sự kiện <b>Có tiền vào</b>, dán URL và API Key ở trên.</li>
+          <li>Phần “Bỏ qua nếu nội dung không có code thanh toán”: chọn <b>Không</b>.</li></ol>
+        <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap"><button type="button" class="btn btn-ghost btn-sm" data-payhook="rotate">Tạo khóa mới</button><button type="button" class="btn btn-ghost btn-sm" data-payhook="disable">Tắt tự động</button></div>`
+      : `<p class="hint" style="margin:0 0 12px">Đang tắt. Đơn chỉ chuyển sang “Đã cọc” khi bạn tự đổi trạng thái.</p><button type="button" class="btn btn-primary btn-sm" data-payhook="rotate">Bật &amp; tạo API Key</button>`;
+    if (location.hostname === "localhost" || location.hostname === "127.0.0.1") box.insertAdjacentHTML("beforeend", `<p class="hint" style="margin-top:10px">Lưu ý: bạn đang mở bằng ${esc(location.host)}, SePay không gọi tới máy này được. URL thật sẽ là https://tên-miền-của-bạn/api/webhooks/sepay.</p>`);
   }
 
   /* ---------------- Thanh toán cọc (VietQR) ---------------- */
@@ -367,13 +390,14 @@
       <div class="bk-list">${list.map(b => `
         <article class="bk">
           <div><span class="code">${esc(b.code)}</span> <span class="status st-${b.status}">${STATUS[b.status]}</span>
-            <span class="when">${esc(b.date.split("-").reverse().join("/"))} · ${esc(b.time)}</span><small>${b.minutes} phút · tạo ${new Date(b.createdAt).toLocaleString("vi-VN")}</small></div>
+            <span class="when">${esc(b.date.split("-").reverse().join("/"))} · ${esc(SHIFT_NAMES[b.time] || b.time)}</span><small>${b.minutes} phút · tạo ${new Date(b.createdAt).toLocaleString("vi-VN")}</small></div>
           <div><b>${esc(b.customer.name)}</b> · <a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a>${b.customer.email ? `<small>${esc(b.customer.email)}</small>` : ""}
             <small>${esc(b.serviceName)} · ${esc(b.photographerName)}</small>
             <small>${esc(b.zoneName)}${b.address ? " · " + esc(b.address) : ""}${b.nights ? ` · ${b.nights} đêm` : ""}${b.fullDay ? " · khóa trọn ngày" : ""}</small>
             ${b.customer.note ? `<small>Ghi chú khách: “${esc(b.customer.note)}”</small>` : ""}</div>
           <div><span class="money">${money(b.total)}${b.needsQuote ? "*" : ""}</span><small>Cọc ${money(b.deposit)}</small>
             ${b.transferNote ? `<small>Nội dung CK: <b style="font-family:var(--font-mono)">${esc(b.transferNote)}</b></small>` : ""}
+            ${(b.payments || []).length ? `<small class="paid-line">Đã nhận ${money(b.payments.reduce((s, x) => s + x.amount, 0))} tự động${b.depositedAt ? " · " + new Date(b.depositedAt).toLocaleString("vi-VN") : ""}</small>` : ""}
             ${b.payTo ? `<small>Cọc vào: ${b.payTo.owner === "photographer" ? "TK riêng của " + esc(b.payTo.ownerName) : "TK team"} · ${esc(b.payTo.bankLabel || b.payTo.bankBin)} ${esc(b.payTo.accountNo)}</small>` : ""}
             <small>${(b.lines || []).slice(1).map(l => esc(l[0])).join(" · ")}</small></div>
           <div><label class="visually-hidden" for="st-${esc(b.code)}">Trạng thái</label>
@@ -389,6 +413,14 @@
     if (home) { e.preventDefault(); go("bookings"); return; }
     const t = e.target.closest("button"); if (!t) return;
     if (t.dataset.nav) { go(t.dataset.nav); return; }
+    if (t.dataset.copyText !== undefined) { try { await navigator.clipboard.writeText(t.dataset.copyText); toast("Đã sao chép"); } catch (err) { toast("Không sao chép được, hãy chọn và copy thủ công"); } return; }
+    if (t.dataset.payhook) {
+      const act = t.dataset.payhook;
+      if (act === "disable" && !(await askConfirm("Tắt tự động xác nhận cọc? SePay sẽ không cập nhật đơn được nữa."))) return;
+      if (act === "rotate" && document.querySelector('[data-payhook="disable"]') && !(await askConfirm("Tạo khóa mới? Khóa cũ ngừng hoạt động, bạn phải dán khóa mới vào SePay."))) return;
+      try { loadPayhook(await api("/api/admin/payhook", { method: "POST", body: JSON.stringify({ action: act }) })); toast(act === "disable" ? "Đã tắt tự động xác nhận cọc" : "Đã tạo API Key mới"); } catch (err) { toast(err.message); }
+      return;
+    }
     if (t.dataset.pfMove) { const [p, j, d] = t.dataset.pfMove.split(":"); const a = getAt(p), n = +j + +d; [a[j], a[n]] = [a[n], a[j]]; setDirty(true); renderSection(); return; }
     if (t.dataset.pfDel) {
       const [p, j] = t.dataset.pfDel.split(":"); const it = getAt(p)[+j];
@@ -445,7 +477,6 @@
     else if (type === "float") v = Math.min(5, Math.max(0, Number(el.value) || 0));
     else if (type === "bool") v = el.checked;
     else if (type === "lines") v = el.value.split("\n").map(s => s.trim()).filter(Boolean);
-    else if (type === "slots") v = el.value.split(/[,\s]+/).map(s => s.trim()).filter(Boolean).map(s => (/^\d:\d\d$/.test(s) ? "0" + s : s));
     else if (type === "set-int" || type === "set-str") {
       v = $$(`input[data-path="${path}"]`).filter(i => i.checked).map(i => (type === "set-int" ? Number(i.value) : i.value));
     } else v = el.value;
@@ -510,7 +541,6 @@
       setDirty(true); updatePayPreview(); return;
     }
     if (el.dataset.path && (el.type === "checkbox" || el.type === "radio")) onEdit(el);
-    if (el.dataset.path && (el.dataset.type === "slots")) { el.value = getAt("timeSlots").join(", "); }
     if (el.dataset.status) {
       try { const bk = await api("/api/admin/bookings/" + encodeURIComponent(el.dataset.status), { method: "PATCH", body: JSON.stringify({ status: el.value }) });
         Object.assign(bookings.find(b => b.code === bk.code), bk); renderNav(); renderSection(); toast(`${bk.code}: ${STATUS[bk.status]}`); }

@@ -40,7 +40,7 @@ window.HERO = {
 window.CATEGORIES = ["Tất cả", "Cá nhân", "Cặp đôi", "Gia đình", "Kỷ yếu", "Doanh nghiệp"];
 
 /* Gói chụp chính
-   duration: phút — dùng để tính số khung giờ liên tiếp cần trống */
+   duration: phút — dài hơn nửa buổi thì khách chỉ chọn được "Cả ngày" */
 window.SERVICES = [
   {
     id: "sv-portrait", name: "Chân dung cá nhân", category: "Cá nhân", duration: 60, price: 1200000, tone: "warm",
@@ -118,7 +118,7 @@ window.PHOTOGRAPHERS = [
 window.ADDONS = [
   { id: "ad-makeup", name: "Makeup & làm tóc", price: 600000, unit: "người", tone: "rose", desc: "Makeup artist của studio, khoảng 45 phút/người." },
   { id: "ad-outfit", name: "Thuê trang phục", price: 300000, unit: "bộ", tone: "dusk", desc: "Chọn từ tủ đồ studio, đã giặt ủi." },
-  { id: "ad-hour", name: "Thêm 1 giờ chụp", price: 700000, unit: "giờ", tone: "warm", desc: "Kéo dài buổi chụp, thêm khung giờ liền sau.", extraMinutes: 60, max: 3 },
+  { id: "ad-hour", name: "Thêm 1 giờ chụp", price: 700000, unit: "giờ", tone: "warm", desc: "Kéo dài buổi chụp thêm 1 tiếng.", extraMinutes: 60, max: 3 },
   { id: "ad-concept", name: "Thêm 1 concept", price: 800000, unit: "concept", tone: "sage", desc: "Thêm bối cảnh, đạo cụ và ánh sáng riêng." },
   { id: "ad-retouch", name: "Retouch nâng cao", price: 80000, unit: "ảnh", tone: "sky", desc: "Chỉnh chi tiết da, dáng, ghép nền.", max: 50 },
   { id: "ad-express", name: "Giao ảnh nhanh 48h", price: 500000, unit: "lần", tone: "stone", desc: "Nhận ảnh hoàn thiện trong 48 giờ.", max: 1 },
@@ -142,8 +142,8 @@ window.TRAVEL_ZONES = [
   { id: "z4", name: "Vùng 4 · Trên 350 km", short: "Vùng 4", fee: 1500000, perNight: 700000, leadDays: 7, fullDay: true, quote: true, examples: "Đà Nẵng, Hà Nội… (đi máy bay)", note: "Công tác phí 1.500.000đ/ngày + vé thực tế, báo giá riêng." },
 ];
 
-/* Khung giờ bắt đầu chụp mỗi ngày (bước 60 phút; nghỉ trưa 12:00) */
-window.TIME_SLOTS = ["08:00", "09:00", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00", "17:00"];
+/* Buổi nhận chụp. "Cả ngày" = từ đầu buổi sáng đến hết buổi chiều. */
+window.SHIFTS = { morning: { start: "08:00", end: "12:00" }, afternoon: { start: "13:00", end: "17:00" } };
 
 /* Số ngày tối đa cho phép đặt trước */
 window.BOOKING_WINDOW_DAYS = 60;

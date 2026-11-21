@@ -13,14 +13,22 @@
     if (r.ok) {
       const d = await r.json();
       Object.assign(window, { HERO: d.hero || window.HERO, SECTIONS: d.sections || {}, STUDIO: d.studio, CATEGORIES: d.categories, SERVICES: d.services, PHOTOGRAPHERS: d.photographers, ADDONS: d.addons,
-        PRODUCTS: d.products, TRAVEL_ZONES: d.zones, TIME_SLOTS: d.timeSlots, BOOKING_WINDOW_DAYS: d.bookingWindowDays });
+        PRODUCTS: d.products, TRAVEL_ZONES: d.zones, SHIFTS: d.shifts || window.SHIFTS, BOOKING_WINDOW_DAYS: d.bookingWindowDays });
       HAS_API = true;
     }
   } catch (e) { /* chạy tĩnh */ }
 
   const S = window.STUDIO, SERVICES = window.SERVICES, PHOTOGRAPHERS = window.PHOTOGRAPHERS,
     ADDONS = window.ADDONS, PRODUCTS = window.PRODUCTS || [] /* đã bỏ mục Sản phẩm; giữ để đọc dữ liệu cũ */, ZONES = window.TRAVEL_ZONES,
-    SLOTS = window.TIME_SLOTS, WINDOW_DAYS = window.BOOKING_WINDOW_DAYS;
+    SH = window.SHIFTS, WINDOW_DAYS = window.BOOKING_WINDOW_DAYS;
+  // Buổi chụp: sáng / chiều / cả ngày (cả ngày = đầu buổi sáng → hết buổi chiều)
+  const SHIFT_LIST = [
+    { id: "full", label: "Cả ngày", start: SH.morning.start, end: SH.afternoon.end },
+    { id: "morning", label: "Buổi sáng", start: SH.morning.start, end: SH.morning.end },
+    { id: "afternoon", label: "Buổi chiều", start: SH.afternoon.start, end: SH.afternoon.end },
+  ];
+  const shiftById = id => SHIFT_LIST.find(s => s.id === id);
+  const shiftText = id => { const s = shiftById(id); return s ? `${s.label} (${s.start} – ${s.end})` : String(id || ""); };
   const M = window.Motion || {};
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -35,7 +43,6 @@
   const DOW_SHORT = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
   const dateLabel = k => { const d = fromKey(k); return `${DOW[d.getDay()]}, ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`; };
   const toMin = t => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
-  const toTime = m => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
   const initials = name => name.split(" ").slice(-2).map(w => w[0]).join("");
   const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
   const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -54,6 +61,7 @@
   let state = blank();
   try { const saved = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); if (saved && saved.step !== "done") state = Object.assign(blank(), saved); } catch (e) { /* bỏ qua */ }
   if (state.date && fromKey(state.date) < today()) { state.date = null; state.time = null; }
+  if (state.time && !shiftById(state.time)) state.time = null; // bản nháp cũ còn giờ kiểu "09:00"
   if (!ZONES.some(z => z.id === state.zoneId)) state.zoneId = ZONES[0].id;
   state.products = {}; // mục Sản phẩm đã bỏ — xóa lựa chọn cũ trong bản nháp
   for (const id of Object.keys(state.addons)) if (!ADDONS.some(a => a.id === id)) delete state.addons[id];
@@ -82,31 +90,37 @@
     return pool.filter(p => p.workDays.includes(dow));
   }
   // Cùng quy tắc với server: đi tỉnh (fullDay) cần trống trọn ngày + số đêm lưu trú
-  function freeAt(p, dateKey, start, minutes) {
-    const z = zoneById(state.zoneId);
-    if (z.fullDay) {
+  function freeAt(p, dateKey, shift) {
+    if (zoneById(state.zoneId).fullDay) {
       for (let i = 0; i <= (state.nights || 0); i++) if (busyOf(p.id, shiftKey(dateKey, i))) return false;
-      return SLOTS.includes(start);
+      return true;
     }
     const e = busyOf(p.id, dateKey); if (e === "day") return false;
-    for (let k = 0; k < Math.ceil(minutes / 60); k++) { const t = toTime(toMin(start) + k * 60); if (!SLOTS.includes(t) || (e && e.includes(t))) return false; }
-    return true;
+    const need = shift === "full" ? ["morning", "afternoon"] : [shift];
+    return !need.some(h => e && e.includes(h));
+  }
+  // Buổi có dùng được với gói + địa điểm đang chọn không (đi tỉnh / gói dài hơn nửa buổi → chỉ "Cả ngày")
+  function shiftFits(id, minutes = totalMinutes()) {
+    if (id === "full") return true;
+    if (zoneById(state.zoneId).fullDay) return false;
+    const s = shiftById(id); return minutes <= toMin(s.end) - toMin(s.start);
   }
   const earliestDay = () => addDays(today(), zoneById(state.zoneId).leadDays || 0);
-  function slotOpen(dateKey, time, minutes = totalMinutes()) {
+  function slotOpen(dateKey, shift, minutes = totalMinutes()) {
+    if (!shiftById(shift) || !shiftFits(shift, minutes)) return false;
     if (fromKey(dateKey) < earliestDay()) return false;
-    if (dateKey === keyOf(today())) { const now = new Date(); if (toMin(time) <= now.getHours() * 60 + now.getMinutes() + 120) return false; }
-    return candidates(dateKey).some(p => freeAt(p, dateKey, time, minutes));
+    if (dateKey === keyOf(today())) { const now = new Date(); if (toMin(shiftById(shift).start) <= now.getHours() * 60 + now.getMinutes() + 120) return false; }
+    return candidates(dateKey).some(p => freeAt(p, dateKey, shift));
   }
   function dayOpen(d) {
     const t = today(); if (d < earliestDay() || d > addDays(t, WINDOW_DAYS)) return false;
-    const k = keyOf(d); return SLOTS.some(s => slotOpen(k, s));
+    const k = keyOf(d); return SHIFT_LIST.some(s => slotOpen(k, s.id));
   }
   // Ai sẽ chụp (khi để team sắp xếp: thám tử đầu tiên còn trống — server sẽ chốt)
   function assignedPhotographer() {
     if (state.photographerId && state.photographerId !== "any") return phById(state.photographerId);
     if (!state.date || !state.time) return null;
-    return candidates(state.date).find(p => freeAt(p, state.date, state.time, totalMinutes())) || null;
+    return candidates(state.date).find(p => freeAt(p, state.date, state.time)) || null;
   }
 
   /* ---------------- Giá ---------------- */
@@ -312,15 +326,16 @@
   }
   function renderSlots() {
     const box = $("#slots"); if (!box) return;
-    if (!state.date) { box.innerHTML = `<div class="empty">Chọn một ngày trên lịch để xem khung giờ còn trống.</div>`; return; }
-    const mins = totalMinutes();
+    if (!state.date) { box.innerHTML = `<div class="empty">Chọn một ngày trên lịch để xem buổi còn trống.</div>`; return; }
+    const mins = totalMinutes(), z = zoneById(state.zoneId), halfOk = SHIFT_LIST.some(s => s.id !== "full" && shiftFits(s.id, mins));
     box.innerHTML = `<p style="font-weight:600">${dateLabel(state.date)}</p>
       <p class="step-sub" style="margin:2px 0 14px">${svcById(state.serviceId).name} · ${mins} phút</p>
-      <div class="slots">${SLOTS.map(s => { const ok = slotOpen(state.date, s, mins);
-        return `<button type="button" class="slot${s === state.time ? " is-selected" : ""}" data-time="${s}" ${ok ? "" : "disabled"} aria-pressed="${s === state.time}">${s}</button>`; }).join("")}</div>
-      <p class="note neutral">${zoneById(state.zoneId).fullDay
-        ? `Chụp đi tỉnh: thám tử cần trống trọn ngày${state.nights ? ` và ${state.nights} ngày sau (ở lại qua đêm)` : ""}.`
-        : `Giờ gạch ngang đã có khách hoặc không đủ ${Math.ceil(mins / 60)} giờ liên tiếp. Nghỉ trưa 12:00–13:00.`}</p>`;
+      <div class="slots shifts">${SHIFT_LIST.map(s => { const ok = slotOpen(state.date, s.id, mins);
+        return `<button type="button" class="slot shift${s.id === state.time ? " is-selected" : ""}" data-time="${s.id}" ${ok ? "" : "disabled"} aria-pressed="${s.id === state.time}"><strong>${s.label}</strong><small>${s.start} – ${s.end}</small></button>`; }).join("")}</div>
+      <p class="note neutral">${z.fullDay
+        ? `Chụp đi tỉnh chỉ nhận lịch cả ngày${state.nights ? `, thám tử cần trống thêm ${state.nights} ngày sau (ở lại qua đêm)` : ""}.`
+        : !halfOk ? `Gói này cần khoảng ${Math.ceil(mins / 60)} tiếng nên chỉ nhận lịch cả ngày.`
+        : `Buổi mờ là đã có khách. Nghỉ trưa ${SH.morning.end} – ${SH.afternoon.start}.`}</p>`;
   }
 
   function renderSummary(prevTotal) {
@@ -331,7 +346,7 @@
     let html = row("Gói chụp", s.name)
       + row("Thám tử", p ? p.name : state.photographerId === "any" ? "Team sắp xếp" : "—")
       + row("Địa điểm", z.short + (state.address ? " · " + esc(state.address) : ""))
-      + row("Lịch", state.date ? `${dateLabel(state.date).replace(/, (\d+)\/(\d+)\/\d+/, " $1/$2")}${state.time ? " · " + state.time : ""}` : "—");
+      + row("Lịch", state.date ? `${dateLabel(state.date).replace(/, (\d+)\/(\d+)\/\d+/, " $1/$2")}${state.time ? " · " + (shiftById(state.time) || {}).label : ""}` : "—");
     html += `<hr class="sum-sep" />` + q.rows.map(([k, v]) => row(k, money(v))).join("");
     html += `<hr class="sum-sep" /><div class="sum-total"><span>Tạm tính${q.needsQuote ? "*" : ""}</span><strong id="sumTotal">${money(q.total)}</strong></div>`
       + `<div class="sum-row sum-deposit"><span>Đặt cọc ${S.depositPercent}%</span><span>${money(q.deposit)}</span></div>`
@@ -388,12 +403,12 @@
       case 3: {
         if (state.address.trim().length < 5) return fail("Nhập địa chỉ hoặc khu vực chụp.", "address");
         if (!state.date) return fail("Chọn ngày chụp.");
-        if (!state.time) return fail("Chọn khung giờ.");
-        if (!slotOpen(state.date, state.time)) { state.time = null; renderSlots(); return fail("Khung giờ vừa chọn không còn trống, chọn giờ khác."); }
+        if (!state.time) return fail("Chọn buổi chụp: cả ngày, sáng hoặc chiều.");
+        if (!slotOpen(state.date, state.time)) { state.time = null; renderSlots(); return fail("Buổi vừa chọn không còn trống, chọn buổi khác."); }
         return true;
       }
       case 4: {
-        if (state.date && state.time && !slotOpen(state.date, state.time)) return fail(`Khung ${state.time} không đủ ${Math.ceil(totalMinutes() / 60)} giờ liên tiếp. Bớt “Thêm giờ” hoặc quay lại bước 3 chọn giờ khác.`);
+        if (state.date && state.time && !slotOpen(state.date, state.time)) return fail(`Với dịch vụ thêm, buổi chụp cần khoảng ${Math.ceil(totalMinutes() / 60)} tiếng, dài hơn ${(shiftById(state.time) || {}).label?.toLowerCase()}. Bớt “Thêm giờ” hoặc quay lại bước 3 chọn “Cả ngày”.`);
         return true;
       }
       case 5: {
@@ -416,7 +431,7 @@
 
   function gcalLink(code) {
     const s = svcById(state.serviceId), z = zoneById(state.zoneId);
-    const start = toMin(state.time), end = start + totalMinutes();
+    const sh = shiftById(state.time), start = toMin(sh.start), end = toMin(sh.end);
     const ymd = state.date.replace(/-/g, "");
     const fmt = m => `${ymd}T${pad(Math.floor(m / 60))}${pad(m % 60)}00`;
     const params = new URLSearchParams({ action: "TEMPLATE", text: `Chụp ảnh ${S.name} · ${s.name}`, dates: `${fmt(start)}/${fmt(end)}`, ctz: "Asia/Ho_Chi_Minh",
@@ -429,7 +444,7 @@
     const q = quote(), ph = assignedPhotographer();
     const payload = { serviceId: state.serviceId, photographerId: state.photographerId, zoneId: state.zoneId, address: state.address, nights: state.nights,
       date: state.date, time: state.time, addons: state.addons, products: {}, customer: state.customer };
-    let code, photographerName = null, transferNote = null, payTo = null;
+    let code, photographerName = null, transferNote = null, payTo = null, viewToken = null;
     if (HAS_API) {
       try {
         const r = await fetch("/api/bookings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -437,10 +452,10 @@
         if (r.status === 409) {
           // Giờ vừa bị người khác đặt: tải lại lịch bận, quay về bước 3
           btnNext.disabled = false; await loadBusy(); state.time = null;
-          await goTo(3); fail(res.error || "Khung giờ vừa có người đặt, chọn giờ khác."); return;
+          await goTo(3); fail(res.error || "Buổi này vừa có người đặt, chọn buổi khác."); return;
         }
         if (!r.ok) { btnNext.disabled = false; btnNext.textContent = "Gửi hồ sơ đặt lịch"; return fail(res.error || "Không gửi được, thử lại sau."); }
-        code = res.code; q.total = res.total; q.deposit = res.deposit; photographerName = res.photographerName; transferNote = res.transferNote; payTo = res.payTo || null; // chốt theo server
+        code = res.code; q.total = res.total; q.deposit = res.deposit; photographerName = res.photographerName; transferNote = res.transferNote; payTo = res.payTo || null; viewToken = res.viewToken || null; // chốt theo server
         await loadBusy();
       } catch (e) { btnNext.disabled = false; btnNext.textContent = "Gửi hồ sơ đặt lịch"; return fail("Mất kết nối, thử lại sau."); }
     } else {
@@ -449,7 +464,7 @@
       try { const all = JSON.parse(localStorage.getItem("mg_bookings") || "[]"); all.push({ code, ...payload }); localStorage.setItem("mg_bookings", JSON.stringify(all)); } catch (e) { /* bỏ qua */ }
     }
     btnNext.disabled = false;
-    showSuccess({ code, ...payload, transferNote, payTo, photographerName: photographerName || (ph ? ph.name : null) }, q, ph);
+    showSuccess({ code, ...payload, transferNote, payTo, viewToken, photographerName: photographerName || (ph ? ph.name : null) }, q, ph);
   }
 
   /* QR chuyển khoản tiền cọc (VietQR) — chỉ hiện khi admin đã bật & nhập tài khoản */
@@ -488,11 +503,15 @@
       <div class="sum-box">
         ${row("Gói chụp", s.name)}${row("Thám tử", b.photographerName || (ph ? ph.name : "Team sắp xếp"))}
         ${row("Địa điểm", `${z.short} · ${esc(b.address)}`)}
-        ${row("Lịch chụp", `${dateLabel(b.date)} · ${b.time}`)}
+        ${row("Lịch chụp", `${dateLabel(b.date)} · ${shiftText(b.time)}`)}
         ${row("Người đặt", `${esc(b.customer.name)} · ${esc(b.customer.phone)}`)}
         ${row("Tổng tạm tính", money(q.total) + (q.needsQuote ? "*" : ""), true)}${row("Cần đặt cọc", `<span style="color:var(--accent)">${money(q.deposit)}</span>`, true)}
       </div>
       ${pay}
+      ${pay && b.viewToken ? `<div class="deposit-status" id="depositStatus" role="status" aria-live="polite">
+        <span class="dot-wait" aria-hidden="true"></span><div><b>Đang chờ tiền cọc…</b><small>Chuyển khoản xong, trang này tự cập nhật trong vài giây.</small></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="btnCheckPaid">Tôi đã chuyển khoản</button></div>` : ""}
+      <div id="chatBox"></div>
       <div class="success-actions">
         <a class="btn btn-primary" href="${gcalLink(b.code)}" target="_blank" rel="noopener">Thêm vào Google Calendar</a>
         <button type="button" class="btn btn-ghost" id="btnNew">Đặt lịch mới</button>
@@ -501,6 +520,68 @@
     try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* bỏ qua */ }
     if (M.successIn) M.successIn(view); else if (M.stepIn) M.stepIn(view);
     $(".success h3").focus({ preventScroll: true });
+    if (pay && b.viewToken) watchDeposit(b);
+  }
+
+  /* ---------------- Theo dõi tiền cọc → hiện khung chat ----------------
+     Server tự chuyển đơn sang "Đã cọc" khi ngân hàng báo có tiền (SePay) hoặc khi admin xác nhận. */
+  let depositTimer = null;
+  const stopWatch = () => { clearTimeout(depositTimer); depositTimer = null; };
+  function watchDeposit(b) {
+    stopWatch();
+    const until = Date.now() + 30 * 60 * 1000; // theo dõi tối đa 30 phút
+    const check = async () => {
+      if (!document.getElementById("depositStatus")) return stopWatch(); // đã rời màn hình này
+      try {
+        const r = await fetch(`/api/bookings/status?code=${encodeURIComponent(b.code)}&t=${encodeURIComponent(b.viewToken)}`, { cache: "no-store" });
+        if (r.ok) { const s = await r.json(); if (s.status === "deposited" || s.status === "done") return showPaid(b, s); }
+      } catch (e) { /* thử lại lần sau */ }
+      const sm = document.querySelector("#depositStatus small");
+      if (sm && sm.textContent === "Đang kiểm tra…") sm.textContent = "Chưa thấy tiền về. Ngân hàng có thể chậm 1–2 phút, trang vẫn đang theo dõi.";
+      if (Date.now() < until) depositTimer = setTimeout(check, 5000);
+      else { const st = document.getElementById("depositStatus"); if (st) st.querySelector("small").textContent = "Chưa thấy tiền về. Team sẽ đối soát và gọi xác nhận cho bạn."; }
+    };
+    check.now = () => { stopWatch(); check(); };
+    watchDeposit.checkNow = check.now;
+    depositTimer = setTimeout(check, 4000);
+  }
+  function showPaid(b, s) {
+    stopWatch();
+    const st = document.getElementById("depositStatus");
+    if (st) { st.classList.add("is-paid"); st.innerHTML = `<span class="dot-ok" aria-hidden="true">✓</span><div><b>Đã nhận cọc ${money(s.paid || s.deposit || 0)}</b><small>Lịch của bạn đã được giữ. Mã hồ sơ ${esc(b.code)}.</small></div>`; }
+    const pb = view.querySelector(".pay-box"); if (pb) pb.hidden = true;
+    const box = document.getElementById("chatBox"); if (box) { box.innerHTML = chatBlock(b, s.contact); if (M.stepIn) M.stepIn(box); }
+  }
+  // Kênh chat với team: Zalo (theo SĐT), Messenger, Instagram, gọi điện
+  function chatLinks() {
+    const out = [], phone = String(S.phone || "").replace(/[^\d+]/g, "").replace(/^\+84/, "0");
+    if (phone) out.push(["Zalo", `https://zalo.me/${phone}`, "zalo"]);
+    const handle = (u, host) => { try { const x = new URL(u); if (!x.hostname.includes(host)) return ""; if (x.pathname === "/profile.php") return x.searchParams.get("id") || ""; return x.pathname.split("/").filter(Boolean)[0] || ""; } catch (e) { return ""; } };
+    const fb = handle(S.facebook || "", "facebook.com"); if (fb) out.push(["Messenger", `https://m.me/${fb}`, "messenger"]);
+    const ig = handle(S.instagram || "", "instagram.com"); if (ig) out.push(["Instagram", `https://ig.me/m/${ig}`, "instagram"]);
+    if (phone) out.push(["Gọi", `tel:${phone}`, "call"], ["Nhắn SMS", smsLink(phone, smsText), "sms"]);
+    return out;
+  }
+  // Mở app Tin nhắn trên điện thoại khách, điền sẵn nội dung ("?&body=" chạy được cả iPhone lẫn Android)
+  let smsText = "";
+  const smsLink = (phone, text) => `sms:${phone}?&body=${encodeURIComponent(text)}`;
+  function chatBlock(b, contact) {
+    smsText = `Chào ${S.name}, mình là ${b.customer.name}, mã hồ sơ ${b.code} (${dateLabel(b.date)} · ${(shiftById(b.time) || {}).label || ""}). Mình đã đặt cọc, muốn trao đổi thêm về buổi chụp.`;
+    const links = chatLinks();
+    const btns = list => `<div class="chat-links">${list.map(([l, h, k]) => `<a class="chat-link chat-${k}" href="${esc(h)}" ${k === "call" || k === "sms" ? "" : 'target="_blank" rel="noopener"'}>${esc(l)}</a>`).join("")}</div>`;
+    // SĐT riêng của thám tử phụ trách (server chỉ gửi khi đơn đã cọc)
+    const ph = contact && /^0\d{9}$/.test(contact.phone || "") ? contact : null;
+    if (!links.length && !ph) return "";
+    return `<section class="chat-box" aria-label="Liên hệ">
+      ${ph ? `<h4>Nhắn trực tiếp thám tử ${esc(ph.name)}</h4>
+        <p class="sum-fine">SĐT/Zalo: <b>${esc(ph.phone)}</b> · thám tử phụ trách buổi chụp của bạn. Trao đổi concept, trang phục, địa điểm.</p>
+        ${btns([["Zalo", `https://zalo.me/${ph.phone}`, "zalo"], ["Gọi", `tel:${ph.phone}`, "call"], ["Nhắn SMS", smsLink(ph.phone, smsText.replace(`Chào ${S.name}`, `Chào ${ph.name}`)), "sms"]])}
+        ${links.length ? `<hr class="sum-sep" /><h4 style="font-size:15px">Hoặc liên hệ team ${esc(S.name)}</h4>` : ""}`
+        : `<h4>Nhắn cho team để trao đổi concept</h4>`}
+      ${links.length ? btns(links) : ""}
+      <p class="sum-fine">Gửi kèm mã hồ sơ <b>${esc(b.code)}</b>${!ph && b.photographerName ? ` · thám tử ${esc(b.photographerName)}` : ""} để được hỗ trợ nhanh.</p>
+      <button type="button" class="link-btn" data-copy="${esc(b.code)}">Sao chép mã hồ sơ</button>
+    </section>`;
   }
 
   /* ---------------- Thay đổi state ---------------- */
@@ -657,7 +738,8 @@
     if (t.matches("[data-time]")) { state.time = t.dataset.time; renderSlots(); refreshSummary(); errEl.textContent = ""; return; }
     if (t.id === "btnNext") { if (!validate()) return; if (state.step === 5) submit(); else goTo(state.step + 1); return; }
     if (t.id === "btnBack") { if (typeof state.step === "number" && state.step > 1) goTo(state.step - 1); return; }
-    if (t.id === "btnNew") { state = blank(); lastTotal = null; renderExtras(); goTo(1); return; }
+    if (t.id === "btnCheckPaid") { const sm = t.parentElement.querySelector("small"); if (sm) sm.textContent = "Đang kiểm tra…"; if (watchDeposit.checkNow) watchDeposit.checkNow(); return; }
+    if (t.id === "btnNew") { stopWatch(); state = blank(); lastTotal = null; renderExtras(); goTo(1); return; }
     if (t.id === "navToggle") { const open = t.getAttribute("aria-expanded") !== "true"; t.setAttribute("aria-expanded", open); $("#nav").classList.toggle("is-open", open); return; }
     if (t.closest("#nav") && t.tagName === "A") { $("#nav").classList.remove("is-open"); $("#navToggle").setAttribute("aria-expanded", "false"); }
     // Bấm logo: cuộn lên đầu trang chủ, bỏ #… trên địa chỉ, đóng menu mobile
