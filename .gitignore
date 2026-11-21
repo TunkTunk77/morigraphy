@@ -1,0 +1,11 @@
+# Dữ liệu chạy thật — không đưa lên git
+data/admin.json
+data/bookings.json
+data/*.tmp
+data/*.backup-*.json
+data/uploads/
+node_modules/
+# Cấu hình máy / bí mật — không đưa lên GitHub
+.claude/
+.env
+*.zip

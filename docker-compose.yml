@@ -1,0 +1,17 @@
+# MoriGraphy — chạy bằng: docker compose up -d --build
+# Trang khách:  http://localhost:5173      Admin: http://localhost:5173/admin.html
+services:
+  morigraphy:
+    build: .
+    image: morigraphy:latest
+    container_name: morigraphy
+    restart: unless-stopped
+    init: true                 # chuyển tín hiệu dừng cho Node đúng cách
+    ports:
+      - "5173:5173"            # đổi số bên trái nếu muốn cổng khác trên máy, VD "8080:5173"
+    environment:
+      TZ: Asia/Ho_Chi_Minh     # giờ Việt Nam cho lịch đặt chụp
+    volumes:
+      # Dùng thư mục data/ hiện có: giữ nguyên tài khoản admin, đơn đặt lịch, ảnh đã tải.
+      # Sao lưu thư mục này thường xuyên.
+      - ./data:/app/data

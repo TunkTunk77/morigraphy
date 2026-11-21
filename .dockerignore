@@ -1,0 +1,17 @@
+# Không đưa vào image: dữ liệu thật (gắn qua volume), file sao lưu, cấu hình máy, git
+data/
+.claude/
+.git/
+.gitignore
+node_modules/
+*.log
+*.tmp
+morigraphy.png
+Dockerfile
+docker-compose.yml
+.dockerignore
+deploy/
+docker-compose.public.yml
+.env
+.env.example
+*.zip

@@ -1,0 +1,9 @@
+# Caddy tự xin và gia hạn chứng chỉ HTTPS (Let's Encrypt) cho tên miền trong biến DOMAIN.
+{$DOMAIN}, www.{$DOMAIN} {
+	@www host www.{$DOMAIN}
+	redir @www https://{$DOMAIN}{uri} permanent
+
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy morigraphy:5173
+}

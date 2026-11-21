@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>MoriGraphy — Quản trị</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/admin.css" />
+</head>
+<body class="admin">
+  <!-- Đăng nhập / thiết lập -->
+  <main class="auth" id="authView" hidden>
+    <form class="auth-card" id="authForm" novalidate>
+      <a class="brand admin-brand" href="/" aria-label="Mori Graphy — về trang chủ website">
+        <picture><source srcset="assets/brand/logo.webp" type="image/webp" /><img src="assets/brand/logo.png" alt="Mori Graphy" width="330" height="160" /></picture>
+        <span class="brand-sub">Phòng quản trị</span>
+      </a>
+      <div id="authFields"></div>
+      <p class="step-error" id="authError" role="alert"></p>
+      <button class="btn btn-primary" type="submit" id="authSubmit">Đăng nhập</button>
+    </form>
+  </main>
+
+  <!-- Bảng quản trị -->
+  <div class="shell" id="appView" hidden>
+    <header class="topbar">
+      <a class="brand admin-brand" href="#bookings" id="adminHome" aria-label="Mori Graphy — về trang đầu quản trị (Đơn đặt lịch)">
+        <picture><source srcset="assets/brand/logo.webp" type="image/webp" /><img src="assets/brand/logo.png" alt="Mori Graphy" width="330" height="160" /></picture>
+        <span class="brand-sub">Phòng quản trị<span class="visually-hidden" id="studioName"></span></span>
+      </a>
+      <div class="topbar-right">
+        <span class="who" id="who"></span>
+        <a class="btn btn-ghost btn-sm" href="/" target="_blank" rel="noopener">Xem trang khách ↗</a>
+        <button class="btn btn-ghost btn-sm" id="btnLogout" type="button">Đăng xuất</button>
+      </div>
+    </header>
+    <nav class="sidenav" id="sidenav" aria-label="Mục quản trị"></nav>
+    <main class="content" id="content" tabindex="-1"></main>
+    <div class="savebar" id="savebar" hidden>
+      <span>Có thay đổi chưa lưu</span>
+      <button class="btn btn-ghost btn-sm" type="button" id="btnRevert">Hoàn tác</button>
+      <button class="btn btn-primary btn-sm" type="button" id="btnSave">Lưu thay đổi</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <!-- Vẽ mã QR (VietQR tạo ngay trên trình duyệt) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+  <script src="js/vietqr.js"></script>
+  <script src="js/hero.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

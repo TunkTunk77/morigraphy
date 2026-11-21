@@ -1,0 +1,12 @@
+{
+  "name": "morigraphy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MoriGraphy — website đặt lịch chụp ảnh + trang admin",
+  "scripts": {
+    "start": "node server/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

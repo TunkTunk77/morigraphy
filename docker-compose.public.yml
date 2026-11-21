@@ -1,0 +1,39 @@
+# MoriGraphy — chạy PUBLIC trên VPS với tên miền + HTTPS tự động (Caddy)
+# 1) Trỏ bản ghi A của tên miền về IP của VPS
+# 2) Tạo file .env cạnh file này:   DOMAIN=tenmiencuaban.com
+# 3) Chạy:  docker compose -f docker-compose.public.yml up -d --build
+services:
+  morigraphy:
+    build: .
+    image: morigraphy:latest
+    container_name: morigraphy
+    restart: unless-stopped
+    init: true
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      TRUST_PROXY: "1"        # lấy IP thật của khách từ Caddy (giới hạn đăng nhập sai theo từng người)
+    volumes:
+      - ./data:/app/data      # dữ liệu thật: admin, đơn đặt lịch, ảnh. Sao lưu thường xuyên.
+    expose:
+      - "5173"                # KHÔNG mở cổng 5173 ra ngoài — chỉ Caddy gọi vào được
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: morigraphy-caddy
+    restart: unless-stopped
+    depends_on:
+      - morigraphy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?Chưa đặt DOMAIN trong file .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # chứng chỉ HTTPS
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

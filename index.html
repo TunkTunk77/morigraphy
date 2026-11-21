@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MoriGraphy — Văn phòng nhiếp ảnh · Đặt lịch chụp</title>
+  <meta name="description" content="MoriGraphy — văn phòng nhiếp ảnh. Đặt lịch chụp online: chọn gói, thám tử ảnh, địa điểm và dịch vụ đi kèm." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#booking">Bỏ qua, đến phần đặt lịch</a>
+
+  <!-- ============ HEADER ============ -->
+  <header class="site-header" id="top">
+    <div class="container header-inner">
+      <a class="brand brand-logo" href="#top" id="brandLink" aria-label="Mori Graphy — về đầu trang">
+        <picture>
+          <source srcset="assets/brand/logo.webp" type="image/webp" />
+          <img src="assets/brand/logo.png" alt="Mori Graphy" width="330" height="160" />
+        </picture>
+      </a>
+      <nav class="nav" id="nav" aria-label="Điều hướng chính">
+        <a href="#services">Gói chụp</a>
+        <a href="#team">Thám tử ảnh</a>
+        <a href="#extras">Dịch vụ đi kèm</a>
+        <a href="#travel">Chụp ngoài tỉnh</a>
+        <a href="#contact">Liên hệ</a>
+      </nav>
+      <a class="btn btn-primary btn-sm header-cta" href="#booking">Đặt lịch</a>
+      <button class="nav-toggle" id="navToggle" aria-label="Mở menu" aria-expanded="false" aria-controls="nav"><span></span><span></span></button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ============ HERO ============ -->
+    <section class="hero">
+      <div class="container hero-inner">
+        <div class="hero-copy" id="heroCopy">
+          <p class="eyebrow hero-anim">Hồ sơ số 2017 · Văn phòng nhiếp ảnh Mori</p>
+          <h1 class="hero-title hero-anim">Mọi khoảnh khắc<br /><em>đều có manh mối</em></h1>
+          <p class="hero-sub hero-anim">Giao “hồ sơ” cho chúng tôi: chọn gói chụp, thám tử ảnh, địa điểm và thời gian. Ánh sáng, góc máy, biểu cảm — để đội ngũ điều tra lo.</p>
+          <div class="hero-actions hero-anim">
+            <a class="btn btn-primary" href="#booking">Mở hồ sơ đặt lịch</a>
+            <a class="btn btn-ghost" href="#services">Xem các hồ sơ gói</a>
+          </div>
+          <dl class="hero-stats hero-anim">
+            <div><dt>2.400+</dt><dd>hồ sơ đã khép</dd></div>
+            <div><dt>4.8/5</dt><dd>đánh giá trung bình</dd></div>
+            <div><dt>4</dt><dd>thám tử ảnh</dd></div>
+          </dl>
+        </div>
+        <div class="hero-visual" id="heroVisual" aria-hidden="true">
+          <div class="folder">
+            <span class="folder-tab">CASE FILE · MG-001</span>
+            <figure class="polaroid">
+              <div class="ph ph-dusk"></div>
+              <figcaption>Bằng chứng #001 — ảnh mẫu</figcaption>
+            </figure>
+            <div class="stamp"><strong>CASE FILE</strong><span>MG · ĐÃ XÁC NHẬN</span></div>
+            <svg class="hero-mag" viewBox="0 0 32 32"><circle cx="13" cy="13" r="9" class="mag-glass"/><path d="M20 20l8 8" class="mag-handle-ink"/></svg>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ GÓI CHỤP ============ -->
+    <section class="section" id="services">
+      <div class="container">
+        <header class="section-head reveal">
+          <p class="eyebrow" data-k="services.eyebrow">Hồ sơ 01 — Gói chụp</p>
+          <h2 data-k="services.title">Chọn hồ sơ phù hợp với bạn</h2>
+          <p class="section-sub" data-k="services.sub">Giá đã gồm ekip, thiết bị ánh sáng và chỉnh sửa cơ bản. Team đến tận nơi bạn chọn; dịch vụ đi kèm và phí đi tỉnh thêm khi đặt lịch.</p>
+        </header>
+        <div class="chips" id="categoryFilter" role="group" aria-label="Lọc theo danh mục"></div>
+        <div class="grid grid-3" id="servicesGrid"></div>
+      </div>
+    </section>
+
+    <!-- ============ THÁM TỬ ẢNH ============ -->
+    <section class="section section-alt" id="team">
+      <div class="container">
+        <header class="section-head reveal">
+          <p class="eyebrow" data-k="team.eyebrow">Hồ sơ 02 — Thám tử ảnh</p>
+          <h2 data-k="team.title">Đội thám tử ảnh của Mori</h2>
+          <p class="section-sub" data-k="team.sub">Mỗi thám tử một “nghiệp vụ” riêng. Bấm vào để xem phong cách, chuyên môn và lịch làm việc.</p>
+        </header>
+        <div class="grid grid-4" id="teamGrid"></div>
+      </div>
+    </section>
+
+    <!-- ============ DỊCH VỤ ĐI KÈM & SẢN PHẨM ============ -->
+    <section class="section" id="extras">
+      <div class="container">
+        <header class="section-head reveal">
+          <p class="eyebrow" data-k="extras.eyebrow">Hồ sơ 03 — Dịch vụ đi kèm</p>
+          <h2 data-k="extras.title">Trang bị thêm cho “vụ án”</h2>
+          <p class="section-sub" data-k="extras.sub">Bấm “Thêm vào hồ sơ” để đưa vào đơn đặt lịch, hoặc chọn lại ở bước 4.</p>
+        </header>
+        <div class="grid grid-3" id="addonsGrid"></div>
+      </div>
+    </section>
+
+    <!-- ============ CHỤP NGOÀI TỈNH ============ -->
+    <section class="section section-alt" id="travel">
+      <div class="container">
+        <header class="section-head reveal">
+          <p class="eyebrow" data-k="travel.eyebrow">Hồ sơ 04 — Chụp ngoài tỉnh</p>
+          <h2 data-k="travel.title">Thám tử đi “hiện trường”</h2>
+          <p class="section-sub" data-k="travel.sub">Team không có studio cố định — chúng tôi đến tận nơi. Phí di chuyển tính theo khu vực, cộng vào đơn ở bước 3.</p>
+        </header>
+        <div class="zones" id="travelGrid"></div>
+        <p class="fine-print">* Phí lưu trú áp dụng khi buổi chụp cần ekip ở lại qua đêm. Vùng 4 báo giá riêng theo vé máy bay/xe thực tế. Số liệu trên là mẫu, team xác nhận lại khi gọi.</p>
+      </div>
+    </section>
+
+    <!-- ============ ĐẶT LỊCH ============ -->
+    <section class="section" id="booking">
+      <div class="container">
+        <header class="section-head reveal">
+          <p class="eyebrow" data-k="booking.eyebrow">Hồ sơ 05 — Đặt lịch</p>
+          <h2 data-k="booking.title">Mở hồ sơ đặt lịch</h2>
+          <p class="section-sub" data-k="booking.sub">5 bước. Team gọi xác nhận trong vòng 2 giờ làm việc.</p>
+        </header>
+
+        <ol class="stepper" id="stepper" aria-label="Các bước đặt lịch"></ol>
+
+        <div class="booking-layout">
+          <form class="booking-card" id="bookingForm" novalidate>
+            <div class="step-view" id="stepView"></div>
+            <div class="step-nav" id="stepNav">
+              <button type="button" class="btn btn-ghost" id="btnBack">← Quay lại</button>
+              <p class="step-error" id="stepError" role="alert"></p>
+              <button type="button" class="btn btn-primary" id="btnNext">Tiếp tục →</button>
+            </div>
+          </form>
+
+          <aside class="summary" id="summary" aria-label="Tóm tắt hồ sơ đặt lịch">
+            <h3>Tóm tắt hồ sơ</h3>
+            <div id="summaryBody"></div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CTA ============ -->
+    <section class="cta-band">
+      <div class="container cta-inner reveal">
+        <div>
+          <h2 data-k="cta.title">Bạn có một khoảnh khắc cần điều tra?</h2>
+          <p data-k="cta.sub">5 bước đơn giản · Team gọi xác nhận trong 2 giờ làm việc · Đặt cọc 30%</p>
+        </div>
+        <a class="btn btn-primary" href="#booking" data-k="cta.btn">Mở hồ sơ ngay →</a>
+      </div>
+    </section>
+
+    <!-- ============ LIÊN HỆ ============ -->
+    <section class="section" id="contact">
+      <div class="container contact-grid">
+        <div class="reveal">
+          <p class="eyebrow" data-k="contact.eyebrow">Liên hệ</p>
+          <h2 data-k="contact.title">Gọi cho đội thám tử</h2>
+          <p class="section-sub" data-k="contact.sub">MoriGraphy là team nhiếp ảnh di động, không có studio cố định. Chúng tôi đến chụp tại địa điểm bạn chọn: nhà riêng, quán cà phê, công viên, văn phòng, trường học…</p>
+        </div>
+        <ul class="contact-list contact-card reveal" id="contactList"></ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <p>© <span id="year"></span> <span data-studio="name">MoriGraphy</span> · Văn phòng nhiếp ảnh</p>
+      <a href="#top">Lên đầu trang ↑</a>
+    </div>
+  </footer>
+
+  <!-- ============ MODAL HỒ SƠ THÁM TỬ ============ -->
+  <div class="modal" id="modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
+      <button class="modal-close" data-close aria-label="Đóng">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg>
+      </button>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- GSAP (miễn phí kể cả plugin). Trang vẫn chạy bình thường nếu CDN lỗi. -->
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/ScrollTrigger.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/CustomEase.min.js"></script>
+
+  <!-- Vẽ mã QR đặt cọc (VietQR tạo ngay trên trình duyệt) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+  <script src="js/vietqr.js"></script>
+
+  <script src="js/hero.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/motion.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
