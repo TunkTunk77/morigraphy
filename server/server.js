@@ -21,6 +21,7 @@ const FILES = {
   bookings: path.join(DATA_DIR, "bookings.json"),
   admin: path.join(DATA_DIR, "admin.json"),
   payhook: path.join(DATA_DIR, "payhook.json"), // khóa bí mật webhook SePay (không công khai)
+  blocks: path.join(DATA_DIR, "blocks.json"),   // ngày bận admin tích tay cho từng thám tử
 };
 const PORT = Number(process.env.PORT || 5173);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -92,6 +93,7 @@ function readRaw(req, limit, msg = `Ảnh quá lớn (tối đa ${Math.round(lim
 // Xóa ảnh không còn dùng (bỏ qua ảnh mới tải < 30 phút, có thể đang nằm trong bản nháp chưa lưu)
 async function cleanUploads(site) {
   const used = new Set(); for (const p of site.photographers) { if (p.avatar) used.add(path.basename(p.avatar)); for (const it of p.portfolio || []) used.add(path.basename(it.src)); }
+  for (const x of site.staff || []) if (x.avatar) used.add(path.basename(x.avatar));
   if (site.hero && site.hero.photo) used.add(path.basename(site.hero.photo)); // ảnh bìa trang chủ
   let names = []; try { names = await fsp.readdir(UPLOAD_DIR); } catch { return 0; }
   let removed = 0;
@@ -128,7 +130,8 @@ function phoneOf(v, who) {
 }
 // Dữ liệu công khai: ẩn số tài khoản và SĐT riêng của thám tử (chỉ gửi cho khách có đơn: TK khi đặt, SĐT khi đã cọc)
 function publicSite(site) {
-  return { ...site, photographers: site.photographers.map(({ payment, phone, ...p }) => ({ ...p, hasOwnPayment: !!(payment && payment.enabled) })) };
+  return { ...site, photographers: site.photographers.map(({ payment, phone, ...p }) => ({ ...p, hasOwnPayment: !!(payment && payment.enabled) })),
+    staff: (site.staff || []).map(({ phone, ...x }) => x) };
 }
 // Nội dung chuyển khoản theo mã hồ sơ (không dấu, không ký tự đặc biệt)
 const transferNote = code => code.replace(/-/g, "") + " COC";
@@ -180,19 +183,25 @@ function validateSite(d) {
       src: uploadSrc(it.src), title: clean(it.title || "", 80), serviceId: svcIds.has(it.serviceId) ? it.serviceId : "" })),
     payment: validatePayment(x.payment, `Tài khoản của ${String(x.name || x.id)}`) }));
   uniqueIds(photographers, "thám tử");
+  // Staff take care buổi chụp: khách chọn khi đặt lịch, không phụ phí, mỗi buổi một người (khóa lịch như thám tử)
+  const staff = arr(d.staff || [], "Staff").map(x => ({ id: idOf(x.id, "staff"), name: req(x.name, "tên staff", 60), role: clean(x.role || "", 60),
+    phone: phoneOf(x.phone, x.name), price: int(x.price || 0, "Giá staff"), tone: tone(x.tone), bio: clean(x.bio || "", 300), avatar: x.avatar ? uploadSrc(x.avatar) : "",
+    workDays: arr(x.workDays || [], "Ngày làm", 7).map(n => int(n, "Ngày làm", 0, 6)) }));
+  uniqueIds([...photographers, ...staff], "thám tử / staff");
   const item = (x, kind) => ({ id: idOf(x.id, kind), name: req(x.name, "tên " + kind, 80), price: int(x.price, "Giá " + kind), unit: req(x.unit || "cái", "đơn vị", 20),
     tone: tone(x.tone), desc: clean(x.desc || "", 200), max: x.max ? int(x.max, "Tối đa", 1, 100) : undefined });
   const addons = arr(d.addons, "Dịch vụ").map(x => ({ ...item(x, "dịch vụ"), extraMinutes: x.extraMinutes ? int(x.extraMinutes, "Thêm phút", 0, 480) : undefined }));
   /* Mục Sản phẩm đã bỏ khỏi web/admin; vẫn đọc được dữ liệu cũ */
   const products = arr(d.products || [], "Sản phẩm").map(x => ({ ...item(x, "sản phẩm"), type: req(x.type || "Khác", "loại", 30) }));
   uniqueIds(addons, "dịch vụ"); uniqueIds(products, "sản phẩm");
-  const zones = arr(d.zones, "Vùng", 20).map(x => ({ id: idOf(x.id, "vùng"), name: req(x.name, "tên vùng", 80), short: req(x.short, "tên ngắn", 30), fee: int(x.fee || 0, "Phí vùng"),
+  const zones = arr(d.zones, "Vùng", 80).map(x => ({ id: idOf(x.id, "vùng"), name: req(x.name, "tên vùng", 80), short: req(x.short, "tên ngắn", 30), fee: int(x.fee || 0, "Phí vùng"),
+    feeMax: int(x.feeMax || 0, "Phí tối đa") > int(x.fee || 0, "Phí vùng") ? int(x.feeMax, "Phí tối đa") : 0, // giá khoảng: đơn tính mức thấp (fee), hiển thị fee – feeMax
     perNight: int(x.perNight || 0, "Phí lưu trú"), leadDays: int(x.leadDays || 0, "Số ngày đặt trước", 0, 90), quote: !!x.quote, fullDay: !!x.fullDay,
     examples: clean(x.examples || "", 160), note: clean(x.note || "", 200) }));
   uniqueIds(zones, "vùng"); if (!zones.length) throw new Invalid("Cần ít nhất 1 khu vực chụp");
   const shifts = validateShifts(d.shifts);
   const categories = ["Tất cả", ...[...new Set(services.map(x => x.category))]];
-  return { studio, categories, services, photographers, addons, products, zones, shifts, bookingWindowDays: int(d.bookingWindowDays, "Số ngày mở lịch", 1, 365),
+  return { studio, categories, services, photographers, staff, addons, products, zones, shifts, bookingWindowDays: int(d.bookingWindowDays, "Số ngày mở lịch", 1, 365),
     hero: validateHero(d.hero), sections: validateSections(d.sections) };
 }
 
@@ -258,6 +267,10 @@ function priceBooking(site, b) {
   if (p && !p.workDays.includes(new Date(b.date + "T00:00:00").getDay())) throw new Invalid("Thám tử nghỉ ngày này");
   const lines = []; let total = s.price; lines.push(["Giá gói", s.price]);
   if (p && p.surcharge) { total += p.surcharge; lines.push(["Phụ phí chọn thám tử", p.surcharge]); }
+  // Staff take care chọn đích danh: cộng giá của staff đó (để team sắp xếp: không tính)
+  const stPick = b.staffId && b.staffId !== "any" ? (site.staff || []).find(x => x.id === b.staffId) : null;
+  if (b.staffId && b.staffId !== "any" && !stPick) throw new Invalid("Staff không tồn tại");
+  if (stPick && stPick.price) { total += stPick.price; lines.push(["Staff take care · " + stPick.name, stPick.price]); }
   if (z.fee) { total += z.fee; lines.push(["Phí đi tỉnh · " + z.short, z.fee]); }
   const nights = z.perNight && !z.quote ? int(b.nights || 0, "Số đêm", 0, 10) : 0;
   if (nights) { total += z.perNight * nights; lines.push([`Lưu trú × ${nights} đêm`, z.perNight * nights]); }
@@ -273,7 +286,7 @@ function priceBooking(site, b) {
    Đơn chưa hủy khóa buổi (sáng/chiều) của thám tử được giao; "Cả ngày" khóa cả hai.
    Đơn đi tỉnh (zone.fullDay) khóa trọn ngày + số đêm lưu trú. */
 const addDaysKey = (k, n) => { const d = new Date(k + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
-function busyMap(bookings, shifts, fromKey = todayKey()) {
+function busyMap(bookings, shifts, fromKey = todayKey(), blocks = {}) {
   const map = {};
   const mark = (date, pid, t) => {
     if (date < fromKey) return;
@@ -282,12 +295,19 @@ function busyMap(bookings, shifts, fromKey = todayKey()) {
     else if (day[pid] !== "day") (day[pid] ||= new Set()).add(t);
   };
   for (const b of bookings) {
-    if (b.status === "cancelled" || !b.photographerId || b.photographerId === "any") continue;
-    if (b.fullDay) for (let i = 0; i <= (b.nights || 0); i++) mark(addDaysKey(b.date, i), b.photographerId, "day");
-    else for (const h of halvesOf(b, shifts)) mark(b.date, b.photographerId, h);
+    if (b.status === "cancelled") continue;
+    const who = [b.photographerId, b.staffId].filter(id => id && id !== "any");
+    for (const id of who) {
+      if (b.fullDay) for (let i = 0; i <= (b.nights || 0); i++) mark(addDaysKey(b.date, i), id, "day");
+      else for (const h of halvesOf(b, shifts)) mark(b.date, id, h);
+    }
   }
+  // Ngày admin tích "bận": "day" khóa cả ngày, "morning"/"afternoon" khóa nửa buổi
+  for (const [pid, days] of Object.entries(blocks || {})) for (const [date, v] of Object.entries(days || {})) mark(date, pid, v);
   return map;
 }
+const BLOCK_VALUES = ["day", "morning", "afternoon"];
+const readBlocks = () => readJSON(FILES.blocks, {});
 function isFree(map, pid, date, shift, fullDay, nights) {
   if (fullDay) { for (let i = 0; i <= nights; i++) if (map[addDaysKey(date, i)]?.[pid]) return false; return true; }
   const e = map[date]?.[pid]; if (e === "day") return false;
@@ -424,7 +444,7 @@ async function api(req, res, url) {
 
   if (p === "/api/data" && method === "GET") return send(res, 200, publicSite(await readJSON(FILES.site)));
   // Chỉ trả về giờ bận theo thám tử — không lộ thông tin khách
-  if (p === "/api/availability" && method === "GET") return send(res, 200, serializeBusy(busyMap(await readJSON(FILES.bookings, []), (await readJSON(FILES.site)).shifts)));
+  if (p === "/api/availability" && method === "GET") return send(res, 200, serializeBusy(busyMap(await readJSON(FILES.bookings, []), (await readJSON(FILES.site)).shifts, todayKey(), await readBlocks())));
 
   if (p === "/api/bookings" && method === "POST") {
     const b = await readBody(req, 50_000);
@@ -486,7 +506,7 @@ async function createBooking(b, res) {
     const address = req2(b.address, "địa chỉ chụp", 200);
     // Kiểm tra trùng lịch với đơn thật & giao thám tử khi khách để team sắp xếp
     const all = await readJSON(FILES.bookings, []);
-    const map = busyMap(all, site.shifts), fullDay = !!q.zone.fullDay, dow = new Date(b.date + "T00:00:00").getDay();
+    const map = busyMap(all, site.shifts, todayKey(), await readBlocks()), fullDay = !!q.zone.fullDay, dow = new Date(b.date + "T00:00:00").getDay();
     let ph = q.photographer;
     if (ph) {
       if (!isFree(map, ph.id, b.date, b.time, fullDay, q.nights)) return send(res, 409, { error: `${ph.name} vừa có lịch vào buổi này. Chọn buổi khác hoặc để team sắp xếp.`, conflict: true });
@@ -494,15 +514,26 @@ async function createBooking(b, res) {
       ph = site.photographers.find(p => p.services.includes(q.service.id) && p.workDays.includes(dow) && isFree(map, p.id, b.date, b.time, fullDay, q.nights));
       if (!ph) return send(res, 409, { error: "Buổi này vừa kín lịch. Vui lòng chọn buổi khác.", conflict: true });
     }
+    // Staff take care: khách chọn đích danh → phải còn trống; "để team sắp xếp" → xếp người trống đầu tiên (không ai trống thì team xếp sau)
+    const staffList = site.staff || [];
+    let st = null;
+    if (b.staffId && b.staffId !== "any") {
+      st = staffList.find(x => x.id === b.staffId);
+      if (!st) throw new Invalid("Staff không tồn tại");
+      if (!st.workDays.includes(dow)) throw new Invalid(`${st.name} nghỉ ngày này`);
+      if (!isFree(map, st.id, b.date, b.time, fullDay, q.nights)) return send(res, 409, { error: `${st.name} vừa có lịch vào buổi này. Chọn staff khác hoặc để team sắp xếp.`, conflict: true });
+    } else st = staffList.find(x => x.workDays.includes(dow) && isFree(map, x.id, b.date, b.time, fullDay, q.nights)) || null;
+    const staffPicked = !!(b.staffId && b.staffId !== "any");
     const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; let r = ""; for (let i = 0; i < 4; i++) r += chars[crypto.randomInt(chars.length)];
     const code = `MG-${b.date.slice(2, 4)}${b.date.slice(5, 7)}${b.date.slice(8, 10)}-${r}`;
     const booking = { code, status: "new", createdAt: new Date().toISOString(), serviceId: q.service.id, serviceName: q.service.name,
       requestedPhotographer: q.photographer ? q.photographer.id : "any", photographerId: ph.id, photographerName: ph.name + (q.photographer ? "" : " (team xếp)"),
+      staffId: st ? st.id : "", staffName: st ? st.name + (staffPicked ? "" : " (team xếp)") : (staffList.length ? "Team sắp xếp" : ""),
       zoneId: q.zone.id, zoneName: q.zone.name, fullDay, address, nights: q.nights, date: b.date, time: b.time, minutes: q.minutes,
       addons: q.addons, products: q.products, lines: q.lines, total: q.total, deposit: q.deposit, needsQuote: q.needsQuote, customer, adminNote: "",
       transferNote: transferNote(code), payTo: payToFor(site, ph), viewToken: crypto.randomBytes(16).toString("hex"), payments: [] };
     all.push(booking); await writeJSON(FILES.bookings, all);
-    return send(res, 201, { code, total: q.total, deposit: q.deposit, photographerId: ph.id, photographerName: ph.name, transferNote: booking.transferNote, payTo: booking.payTo, viewToken: booking.viewToken });
+    return send(res, 201, { code, total: q.total, deposit: q.deposit, photographerId: ph.id, photographerName: ph.name, staffName: booking.staffName, transferNote: booking.transferNote, payTo: booking.payTo, viewToken: booking.viewToken });
 }
 
 async function adminApi(req, res, p, method) {
@@ -569,6 +600,28 @@ async function adminApi(req, res, p, method) {
     });
   }
   // Cấu hình tự xác nhận cọc (SePay): xem / tạo khóa mới / tắt
+  // Lịch bận thám tử: GET trả ngày tích tay + ngày đã có khách; POST đặt/bỏ một ngày
+  if (p === "/api/admin/blocks" && method === "GET") {
+    const site = await readJSON(FILES.site);
+    return send(res, 200, { blocks: await readBlocks(), booked: serializeBusy(busyMap(await readJSON(FILES.bookings, []), site.shifts)) });
+  }
+  if (p === "/api/admin/blocks" && method === "POST") {
+    const b = await readBody(req, 5000);
+    const site = await readJSON(FILES.site);
+    if (!(site.photographers || []).some(x => x.id === b.pid)) return send(res, 400, { error: "Không có thám tử này" });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.date)) || isNaN(new Date(b.date + "T00:00:00Z"))) return send(res, 400, { error: "Ngày không hợp lệ" });
+    if (b.value && !BLOCK_VALUES.includes(b.value)) return send(res, 400, { error: "Kiểu bận không hợp lệ" });
+    return withBookingLock(async () => {
+      const all = await readBlocks(), today = todayKey(), ids = new Set(site.photographers.map(x => x.id));
+      // Dọn ngày đã qua và thám tử đã xóa cho file gọn
+      for (const pid of Object.keys(all)) { if (!ids.has(pid)) { delete all[pid]; continue; } for (const d of Object.keys(all[pid])) if (d < today) delete all[pid][d]; }
+      const mine = (all[b.pid] ||= {});
+      if (b.value) mine[b.date] = b.value; else delete mine[b.date];
+      if (!Object.keys(mine).length) delete all[b.pid];
+      await writeJSON(FILES.blocks, all);
+      return send(res, 200, { blocks: all });
+    });
+  }
   if (p === "/api/admin/payhook" && method === "GET") { const h = await readJSON(FILES.payhook, null); return send(res, 200, { apiKey: h?.apiKey || "", path: "/api/webhooks/sepay" }); }
   if (p === "/api/admin/payhook" && method === "POST") {
     const b = await readBody(req, 1000);

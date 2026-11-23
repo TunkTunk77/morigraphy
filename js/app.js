@@ -12,7 +12,7 @@
     // index.html đã bắt đầu tải sẵn từ <head>; không có thì tự tải
     const d = await (window.__MG_DATA || fetch("/api/data", { cache: "no-store" }).then(r => r.ok ? r.json() : null));
     if (d) {
-      Object.assign(window, { HERO: d.hero || window.HERO, SECTIONS: d.sections || {}, STUDIO: d.studio, CATEGORIES: d.categories, SERVICES: d.services, PHOTOGRAPHERS: d.photographers, ADDONS: d.addons,
+      Object.assign(window, { HERO: d.hero || window.HERO, SECTIONS: d.sections || {}, STUDIO: d.studio, CATEGORIES: d.categories, SERVICES: d.services, PHOTOGRAPHERS: d.photographers, STAFF: d.staff || [], ADDONS: d.addons,
         PRODUCTS: d.products, TRAVEL_ZONES: d.zones, SHIFTS: d.shifts || window.SHIFTS, BOOKING_WINDOW_DAYS: d.bookingWindowDays });
       HAS_API = true;
     }
@@ -48,13 +48,17 @@
   const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
   const svcById = id => SERVICES.find(s => s.id === id);
   const phById = id => PHOTOGRAPHERS.find(p => p.id === id);
+  const STAFF = window.STAFF || [];
+  const stById = id => STAFF.find(x => x.id === id);
   const zoneById = id => ZONES.find(z => z.id === id) || ZONES[0];
+  // Giá đi tỉnh dạng khoảng (fee – feeMax); n = số thám tử
+  const feeRange = (z, n = 1) => z.feeMax > z.fee ? `${money(z.fee * n)} – ${money(z.feeMax * n)}` : money(z.fee * n);
   const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/></svg>';
 
   /* ---------------- State (lưu nháp trong trình duyệt) ---------------- */
   const DRAFT_KEY = "mg_draft_v1";
   const blank = () => ({
-    step: 1, maxStep: 1, serviceId: null, photographerId: null, zoneId: ZONES[0].id, nights: 0, address: "",
+    step: 1, maxStep: 1, serviceId: null, photographerId: null, staffId: "any", zoneId: ZONES[0].id, nights: 0, address: "",
     date: null, time: null, calMonth: null, addons: {}, products: {},
     customer: { name: "", phone: "", email: "", note: "", agree: false },
   });
@@ -67,6 +71,7 @@
   for (const id of Object.keys(state.addons)) if (!ADDONS.some(a => a.id === id)) delete state.addons[id];
   if (state.photographerId && state.photographerId !== "any" && !phById(state.photographerId)) state.photographerId = null;
   if (state.serviceId && !svcById(state.serviceId)) state.serviceId = null;
+  if (!state.staffId || (state.staffId !== "any" && !stById(state.staffId))) state.staffId = "any";
   const save = () => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(state)); } catch (e) { /* bỏ qua */ } };
 
   /* ---------------- Lịch bận (từ đơn thật trên server) ----------------
@@ -110,7 +115,14 @@
     if (!shiftById(shift) || !shiftFits(shift, minutes)) return false;
     if (fromKey(dateKey) < earliestDay()) return false;
     if (dateKey === keyOf(today())) { const now = new Date(); if (toMin(shiftById(shift).start) <= now.getHours() * 60 + now.getMinutes() + 120) return false; }
+    if (!staffFree(dateKey, shift)) return false;
     return candidates(dateKey).some(p => freeAt(p, dateKey, shift));
+  }
+  // Staff khách chọn đích danh phải làm ngày đó và còn trống buổi đó (để team sắp xếp: không chặn)
+  function staffFree(dateKey, shift) {
+    const st = state.staffId && state.staffId !== "any" ? stById(state.staffId) : null;
+    if (!st) return true;
+    return (st.workDays || []).includes(fromKey(dateKey).getDay()) && freeAt(st, dateKey, shift);
   }
   function dayOpen(d) {
     const t = today(); if (d < earliestDay() || d > addDays(t, WINDOW_DAYS)) return false;
@@ -130,7 +142,9 @@
     if (s) { rows.push(["Giá gói", s.price]); total += s.price; }
     const p = state.photographerId && state.photographerId !== "any" ? phById(state.photographerId) : null;
     if (p && p.surcharge) { rows.push(["Phụ phí chọn thám tử", p.surcharge]); total += p.surcharge; }
-    if (z.fee) { rows.push([`Phí di chuyển · ${z.short}`, z.fee]); total += z.fee; }
+    const stp = state.staffId && state.staffId !== "any" ? stById(state.staffId) : null;
+    if (stp && stp.price) { rows.push([`Staff take care · ${stp.name}`, stp.price]); total += stp.price; }
+    if (z.fee) { rows.push([`Phí di chuyển · ${z.short}${z.feeMax > z.fee ? " (mức thấp)" : ""}`, z.fee]); total += z.fee; }
     if (z.perNight && state.nights) { const v = z.perNight * state.nights; rows.push([`Lưu trú ekip × ${state.nights} đêm`, v]); total += v; }
     for (const a of ADDONS) { const q = state.addons[a.id] || 0; if (q) { rows.push([`${a.name} × ${q}`, a.price * q]); total += a.price * q; } }
     for (const pr of PRODUCTS) { const q = state.products[pr.id] || 0; if (q) { rows.push([`${pr.name} × ${q}`, pr.price * q]); total += pr.price * q; } }
@@ -152,15 +166,47 @@
     $$("[data-studio=name]").forEach(el => (el.textContent = S.name));
     $$("[data-studio=deposit]").forEach(el => (el.textContent = S.depositPercent));
     $("#year").textContent = new Date().getFullYear();
+    renderFooter();
     const tel = S.phone.replace(/\s/g, "");
+    // Icon nét mảnh cho từng dòng liên hệ (SVG nội tuyến, không tải thêm gì)
+    const ic = d => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+    const ICONS = {
+      "Khu vực": ["pin", ic('<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>')],
+      "Điện thoại": ["phone", ic('<path d="M5 4h3.5l1.6 4.2-2.1 1.4a11 11 0 0 0 6.4 6.4l1.4-2.1L20 15.5V19a1.5 1.5 0 0 1-1.6 1.5C10.6 20 4 13.4 3.5 5.6A1.5 1.5 0 0 1 5 4z"/>')],
+      "Email": ["mail", ic('<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3.5 6.5 12 13l8.5-6.5"/>')],
+      "Nhận lịch": ["clock", ic('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>')],
+      "Facebook": ["fb", ic('<path d="M14.5 8H17V4.5h-2.5A4 4 0 0 0 10.5 8.5V11H8v3.5h2.5V21H14v-6.5h2.6l.4-3.5h-3V9a1 1 0 0 1 1-1z"/>')],
+      "Instagram": ["ig", ic('<rect x="3.5" y="3.5" width="17" height="17" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.2" cy="6.8" r=".9" fill="currentColor" stroke="none"/>')],
+    };
     $("#contactList").innerHTML = [
       ["Khu vực", S.area],
-      ["Điện thoại", `<a href="tel:${tel}">${S.phone}</a> · <a href="https://zalo.me/${tel}" target="_blank" rel="noopener">Zalo</a>`],
+      ["Điện thoại", S.phone && `<a href="tel:${tel}">${S.phone}</a> · <a href="https://zalo.me/${tel}" target="_blank" rel="noopener">Zalo</a>`],
       ["Email", S.email && `<a href="mailto:${S.email}">${S.email}</a>`],
       ["Nhận lịch", S.openHours],
       ["Facebook", S.facebook && `<a href="${S.facebook}" target="_blank" rel="noopener">${S.facebook.replace(/^https:\/\/(www\.)?/, "")}</a>`],
       ["Instagram", S.instagram && `<a href="${S.instagram}" target="_blank" rel="noopener">${S.instagram.replace(/^https:\/\/(www\.)?/, "")}</a>`],
-    ].filter(([, v]) => v).map(([k, v]) => `<li><span>${k}</span><span class="contact-val">${v}</span></li>`).join("");
+    ].filter(([, v]) => v).map(([k, v]) => { const [cls, svg] = ICONS[k] || ["pin", ""];
+      return `<li><span class="contact-ic ic-${cls}">${svg}</span><span class="contact-txt"><span class="contact-key">${k}</span><span class="contact-val">${v}</span></span></li>`; }).join("");
+  }
+
+  /* Chân trang: lối tắt tới các trang + kênh chat (Zalo / Messenger / Instagram) kèm icon nhỏ */
+  function renderFooter() {
+    const phone = String(S.phone || "").replace(/[^\d+]/g, "").replace(/^\+84/, "0");
+    const handle = (u, host) => { try { const x = new URL(u); if (!x.hostname.includes(host)) return ""; if (x.pathname === "/profile.php") return x.searchParams.get("id") || ""; return x.pathname.split("/").filter(Boolean)[0] || ""; } catch (e) { return ""; } };
+    const fb = handle(S.facebook || "", "facebook.com");
+    const svg = d => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+    const ICON = {
+      zalo: svg('<rect x="2" y="2" width="20" height="20" rx="6" fill="currentColor"/><path d="M7 9h4.2L7 15h4.4M13.6 8.5V15M15.8 12.6a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'),
+      messenger: svg('<path d="M12 2.5C6.6 2.5 2.5 6.4 2.5 11.6c0 2.7 1.1 5 3 6.6V21.5l2.9-1.6c1.1.3 2.3.5 3.6.5 5.4 0 9.5-3.9 9.5-9.1S17.4 2.5 12 2.5z" fill="currentColor"/><path d="m6.6 14.3 3.2-3.4 2.2 1.8 3.4-1.8-3.2 3.4-2.2-1.8z" fill="#fff"/>'),
+      instagram: svg('<rect x="3" y="3" width="18" height="18" rx="5.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="17.3" cy="6.7" r="1.2" fill="currentColor"/>'),
+    };
+    const pages = [["#services", "Gói chụp"], ["#team", "Thám tử ảnh"], ["#travel", "Chụp ngoài tỉnh"]].map(([h, l]) => `<a href="${h}">${l}</a>`);
+    const social = [
+      phone && ["zalo", "Zalo", `https://zalo.me/${phone}`],
+      fb && ["messenger", "Messenger", `https://m.me/${fb}`],
+      S.instagram && ["instagram", "Instagram", S.instagram],
+    ].filter(Boolean).map(([k, l, u]) => `<a href="${u}" target="_blank" rel="noopener" class="fn-social fn-${k}">${ICON[k]}${l}</a>`);
+    $("#footerNav").innerHTML = [...pages, ...social].join("");
   }
 
   let activeCat = "Tất cả";
@@ -219,16 +265,48 @@
     $("#addonsGrid").innerHTML = ADDONS.map(a => itemHTML("addon", a)).join("");
   }
 
+  /* Chụp ngoài tỉnh: chọn nơi chụp + số thám tử → xem phụ phí; bảng đầy đủ gập lại bên dưới */
+  const tvState = { zoneId: "", count: 1 };
+  const zoneTitle = z => (z.name.split("·")[1] || z.name).trim();
+  const zoneFeeText = z => z.quote ? "Báo giá riêng" : z.fee ? feeRange(z) : "Miễn phí";
+  function travelResult() {
+    const z = ZONES.find(x => x.id === tvState.zoneId);
+    if (!z) return `<p class="tv-hint">Chọn nơi chụp để xem phụ phí.</p>`;
+    const n = tvState.count, per = n > 1 ? ` <small>(${feeRange(z)} × ${n} thám tử)</small>` : "";
+    const main = z.quote ? `<strong>Báo giá riêng</strong>${z.fee ? ` <small>· công tác phí từ ${money(z.fee * n)}/ngày + vé thực tế</small>` : ""}`
+      : z.fee ? `<strong>${feeRange(z, n)}</strong> / buổi${per}` : `<strong>Miễn phí di chuyển</strong>`;
+    const extra = [
+      z.perNight && !z.quote ? `+ ${money(z.perNight * n)} / đêm nếu ekip cần ở lại` : "",
+      z.fullDay ? "Chỉ nhận lịch cả ngày" : "",
+      z.leadDays ? `Đặt trước ít nhất ${z.leadDays} ngày` : "",
+    ].filter(Boolean);
+    return `<div class="tv-result" aria-live="polite">
+        <p class="tv-fee">Phụ phí di chuyển: ${main}</p>
+        ${extra.length ? `<p class="tv-extra">${extra.join(" · ")}</p>` : ""}
+        <button type="button" class="link-btn" data-pick-zone="${z.id}">Chọn nơi này khi đặt lịch →</button>
+      </div>`;
+  }
   function renderTravel() {
-    $("#travelGrid").innerHTML = ZONES.map((z, i) => `
-      <article class="zone reveal">
-        <span class="zone-no">Hiện trường 0${i + 1}</span>
-        <h3>${(z.name.split("·")[1] || z.name).trim()}</h3>
-        <p class="zone-ex">${z.short} · ${z.examples}</p>
-        <p class="zone-fee">${z.fee ? (z.quote ? "Báo giá riêng" : money(z.fee) + " / buổi") : "Miễn phí"}
-          <small>${z.perNight && !z.quote ? "+ " + money(z.perNight) + " / đêm lưu trú nếu cần" : z.note}${z.leadDays ? ` Đặt trước ≥ ${z.leadDays} ngày.` : ""}</small></p>
-        <button type="button" class="link-btn" data-pick-zone="${z.id}">Chọn khi đặt lịch →</button>
-      </article>`).join("");
+    const maxN = Math.max(1, Math.min(6, PHOTOGRAPHERS.length));
+    if (tvState.count > maxN) tvState.count = maxN;
+    const notes = ZONES.filter(z => z.note).map(z => `<li><b>${esc(zoneTitle(z))}:</b> ${esc(z.note)}</li>`).join("");
+    $("#travelGrid").innerHTML = `
+      <div class="tv-card reveal">
+        <div class="tv-fields">
+          <div class="field"><label for="tvZone">Nơi chụp</label>
+            <select id="tvZone"><option value="">Chọn nơi chụp…</option>${ZONES.map(z => `<option value="${z.id}" ${z.id === tvState.zoneId ? "selected" : ""}>${esc(zoneTitle(z))} · ${zoneFeeText(z)}</option>`).join("")}</select></div>
+          <div class="field"><label for="tvCount">Số thám tử</label>
+            <select id="tvCount">${Array.from({ length: maxN }, (_, i) => `<option value="${i + 1}" ${i + 1 === tvState.count ? "selected" : ""}>${i + 1} thám tử</option>`).join("")}</select></div>
+        </div>
+        <div id="tvResult">${travelResult()}</div>
+      </div>
+      <details class="tv-table reveal">
+        <summary>Xem bảng phụ phí ${ZONES.length} địa điểm</summary>
+        <ul class="tv-list">${ZONES.map(z => { const sub = z.examples || z.note || "";
+          return `<li><div><b>${esc(zoneTitle(z))}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</div>
+            <div class="tv-price"><strong>${zoneFeeText(z)}</strong>${z.fee && !z.quote ? "<small>/ 1 thám tử</small>" : ""}</div></li>`; }).join("")}</ul>
+      </details>
+      ${notes ? `<ul class="tv-notes reveal">${notes}</ul>` : ""}`;
   }
 
   /* ---------------- Đặt lịch ---------------- */
@@ -270,7 +348,15 @@
             lead: `<span class="opt-avatar ph-${p.tone}" aria-hidden="true">${p.avatar ? `<img src="${p.avatar}" alt="" />` : initials(p.name)}</span>`,
             title: p.name, sub: ok ? `${p.role} · ★ ${p.rating} · ${p.specialties.slice(0, 2).join(", ")} · <button type="button" class="link-btn" data-profile="${p.id}">Hồ sơ</button>` : "Không nhận gói này",
             side: ok ? (p.surcharge ? "+" + money(p.surcharge) : "Không phụ phí") : "" }); }).join("")}
-        </div>`;
+        </div>
+        ${STAFF.length ? `<p class="group-label">Staff take care buổi chụp</p>
+        <p class="step-sub" style="margin-top:-6px">Người chăm sóc bạn trong buổi chụp: hỗ trợ tạo dáng, chỉnh trang phục, đạo cụ.</p>
+        <div class="options one-col">
+        ${option({ name: "staff", value: "any", checked: state.staffId === "any", title: "Để team sắp xếp", sub: "Team chọn staff còn trống lịch", side: "Không phụ phí" })}
+        ${STAFF.map(x => option({ name: "staff", value: x.id, checked: x.id === state.staffId,
+            lead: `<span class="opt-avatar ph-${x.tone || "sage"}" aria-hidden="true">${x.avatar ? `<img src="${x.avatar}" alt="" />` : initials(x.name)}</span>`,
+            title: esc(x.name), sub: esc([x.role, x.bio].filter(Boolean).join(" · ")), side: x.price ? "+" + money(x.price) : "Miễn phí" })).join("")}
+        </div>` : ""}`;
     },
     3() {
       const z = zoneById(state.zoneId);
@@ -279,7 +365,7 @@
         <p class="group-label">Khu vực chụp</p>
         <div class="options">${ZONES.map(zz => option({ name: "zone", value: zz.id, checked: zz.id === state.zoneId,
           title: zz.name, sub: zz.examples + (zz.leadDays ? ` · đặt trước ≥ ${zz.leadDays} ngày` : ""),
-          side: zz.fee ? (zz.quote ? "Báo giá riêng" : "+" + money(zz.fee)) : "Miễn phí" })).join("")}</div>
+          side: zz.fee ? (zz.quote ? "Báo giá riêng" : "+" + feeRange(zz)) : "Miễn phí" })).join("")}</div>
         ${away ? `<div class="fields" style="margin-top:16px">
           <div class="field ${z.perNight && !z.quote ? "" : "full"}" data-field="address"><label for="fAddress">Địa chỉ / khu vực chụp *</label>
             <input id="fAddress" name="address" value="${esc(state.address)}" placeholder="VD: Hồ Xuân Hương, Đà Lạt, Lâm Đồng" autocomplete="street-address" /><span class="err"></span></div>
@@ -350,12 +436,13 @@
     if (!s) { $("#summaryBody").innerHTML = `<p class="sum-empty">Chưa có gói chụp. Chọn gói ở bước 1 hoặc bấm “Chọn gói” phía trên.</p>`; return; }
     let html = row("Gói chụp", s.name)
       + row("Thám tử", p ? p.name : state.photographerId === "any" ? "Team sắp xếp" : "—")
+      + (STAFF.length ? row("Staff take care", state.staffId !== "any" && stById(state.staffId) ? esc(stById(state.staffId).name) : "Team sắp xếp") : "")
       + row("Địa điểm", z.short + (state.address ? " · " + esc(state.address) : ""))
       + row("Lịch", state.date ? `${dateLabel(state.date).replace(/, (\d+)\/(\d+)\/\d+/, " $1/$2")}${state.time ? " · " + (shiftById(state.time) || {}).label : ""}` : "—");
     html += `<hr class="sum-sep" />` + q.rows.map(([k, v]) => row(k, money(v))).join("");
     html += `<hr class="sum-sep" /><div class="sum-total"><span>Tạm tính${q.needsQuote ? "*" : ""}</span><strong id="sumTotal">${money(q.total)}</strong></div>`
       + `<div class="sum-row sum-deposit"><span>Đặt cọc ${S.depositPercent}%</span><span>${money(q.deposit)}</span></div>`
-      + `<p class="sum-fine">${q.needsQuote ? "* Chưa gồm vé di chuyển xa, team báo giá riêng. " : ""}Thanh toán phần còn lại sau buổi chụp.</p>`;
+      + `<p class="sum-fine">${q.needsQuote ? "* Chưa gồm vé di chuyển xa, team báo giá riêng. " : ""}${z.feeMax > z.fee ? `Phí di chuyển ${esc(z.short)} thực tế từ ${money(z.fee)} đến ${money(z.feeMax)}, team báo chính xác khi gọi. ` : ""}Thanh toán phần còn lại sau buổi chụp.</p>`;
     $("#summaryBody").innerHTML = html;
     if (prevTotal != null && prevTotal !== q.total && M.pulse) M.pulse($("#sumTotal"));
   }
@@ -447,9 +534,9 @@
   async function submit() {
     btnNext.disabled = true; btnNext.textContent = "Đang gửi…";
     const q = quote(), ph = assignedPhotographer();
-    const payload = { serviceId: state.serviceId, photographerId: state.photographerId, zoneId: state.zoneId, address: state.address, nights: state.nights,
+    const payload = { serviceId: state.serviceId, photographerId: state.photographerId, staffId: state.staffId || "any", zoneId: state.zoneId, address: state.address, nights: state.nights,
       date: state.date, time: state.time, addons: state.addons, products: {}, customer: state.customer };
-    let code, photographerName = null, transferNote = null, payTo = null, viewToken = null;
+    let code, photographerName = null, staffName = null, transferNote = null, payTo = null, viewToken = null;
     if (HAS_API) {
       try {
         const r = await fetch("/api/bookings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -460,7 +547,7 @@
           await goTo(3); fail(res.error || "Buổi này vừa có người đặt, chọn buổi khác."); return;
         }
         if (!r.ok) { btnNext.disabled = false; btnNext.textContent = "Gửi hồ sơ đặt lịch"; return fail(res.error || "Không gửi được, thử lại sau."); }
-        code = res.code; q.total = res.total; q.deposit = res.deposit; photographerName = res.photographerName; transferNote = res.transferNote; payTo = res.payTo || null; viewToken = res.viewToken || null; // chốt theo server
+        code = res.code; q.total = res.total; q.deposit = res.deposit; photographerName = res.photographerName; staffName = res.staffName || null; transferNote = res.transferNote; payTo = res.payTo || null; viewToken = res.viewToken || null; // chốt theo server
         await loadBusy();
       } catch (e) { btnNext.disabled = false; btnNext.textContent = "Gửi hồ sơ đặt lịch"; return fail("Mất kết nối, thử lại sau."); }
     } else {
@@ -469,7 +556,8 @@
       try { const all = JSON.parse(localStorage.getItem("mg_bookings") || "[]"); all.push({ code, ...payload }); localStorage.setItem("mg_bookings", JSON.stringify(all)); } catch (e) { /* bỏ qua */ }
     }
     btnNext.disabled = false;
-    showSuccess({ code, ...payload, transferNote, payTo, viewToken, photographerName: photographerName || (ph ? ph.name : null) }, q, ph);
+    showSuccess({ code, ...payload, transferNote, payTo, viewToken, photographerName: photographerName || (ph ? ph.name : null),
+      staffName: staffName || (STAFF.length ? (stById(state.staffId) || {}).name || "Team sắp xếp" : null) }, q, ph);
   }
 
   /* QR chuyển khoản tiền cọc (VietQR) — chỉ hiện khi admin đã bật & nhập tài khoản */
@@ -506,7 +594,7 @@
         : "Team sẽ gọi xác nhận trong vòng 2 giờ làm việc và gửi thông tin đặt cọc qua Zalo/SMS."}</p>
       <span class="case-code">Mã hồ sơ: ${b.code}</span>
       <div class="sum-box">
-        ${row("Gói chụp", s.name)}${row("Thám tử", b.photographerName || (ph ? ph.name : "Team sắp xếp"))}
+        ${row("Gói chụp", s.name)}${row("Thám tử", b.photographerName || (ph ? ph.name : "Team sắp xếp"))}${b.staffName ? row("Staff take care", esc(b.staffName)) : ""}
         ${row("Địa điểm", `${z.short} · ${esc(b.address)}`)}
         ${row("Lịch chụp", `${dateLabel(b.date)} · ${shiftText(b.time)}`)}
         ${row("Người đặt", `${esc(b.customer.name)} · ${esc(b.customer.phone)}`)}
@@ -761,9 +849,14 @@
     if (href && href.startsWith("#") && href === location.hash) { e.preventDefault(); window.scrollTo({ top: 0 }); }
   });
 
+  document.addEventListener("change", e => {
+    if (e.target.id === "tvZone") { tvState.zoneId = e.target.value; $("#tvResult").innerHTML = travelResult(); }
+    else if (e.target.id === "tvCount") { tvState.count = Number(e.target.value) || 1; $("#tvResult").innerHTML = travelResult(); }
+  });
   view.addEventListener("change", e => {
     const el = e.target;
     if (el.name === "service") { setService(el.value); refreshSummary(); errEl.textContent = ""; }
+    else if (el.name === "staff") { state.staffId = el.value; if (state.time && state.date && !slotOpen(state.date, state.time)) { state.time = null; toast("Staff này đã có lịch vào buổi đã chọn, chọn lại buổi nhé."); } refreshSummary(); errEl.textContent = ""; }
     else if (el.name === "photographer") { state.photographerId = el.value; if (state.time && state.date && !slotOpen(state.date, state.time)) state.time = null; refreshSummary(); errEl.textContent = ""; }
     else if (el.name === "zone") { const z = zoneById(el.value); state.zoneId = z.id; if (!z.perNight || z.quote) state.nights = 0;
       if (state.date && fromKey(state.date) < earliestDay()) { state.date = null; state.time = null; toast(`${z.short} cần đặt trước ít nhất ${z.leadDays} ngày — chọn lại ngày nhé.`); }

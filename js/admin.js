@@ -91,7 +91,7 @@
   let saved = null, draft = null, bookings = [], section = "studio", dirty = false;
 
   async function enterApp(user) {
-    saved = await api("/api/admin/data"); draft = clone(saved);
+    saved = await api("/api/admin/data"); saved.staff ||= []; draft = clone(saved);
     $("#who").textContent = "Đăng nhập: " + user;
     $("#authView").hidden = true; $("#appView").hidden = false;
     await loadBookings(false);
@@ -121,13 +121,19 @@
       fields: [["name", "Tên dịch vụ", "text"], ["price", "Giá (đ)", "money"], ["unit", "Đơn vị", "text"], ["max", "Tối đa mỗi đơn (trống = 10)", "optnumber"], ["extraMinutes", "Thêm phút chụp / đơn vị", "optnumber"], ["tone", "Màu ảnh giữ chỗ", "tone"], ["desc", "Mô tả", "textarea", "full"]] },
     zones: { title: "Phí chụp ngoài tỉnh", intro: "Team không có studio: mọi buổi chụp ở địa điểm khách chọn. Đặt phí di chuyển theo vùng, phí lưu trú, số ngày đặt trước. “Chiếm trọn ngày” khóa cả ngày của thám tử (và số đêm ở lại).", prefix: "z",
       blank: () => ({ name: "Vùng mới · Mô tả", short: "Vùng mới", fee: 0, perNight: 0, leadDays: 1, quote: false, fullDay: true, examples: "", note: "" }),
-      side: x => (x.quote ? "Báo giá riêng" : x.fee ? money(x.fee) : "Miễn phí"), sub: x => `${x.examples} · đặt trước ${x.leadDays} ngày`,
+      side: x => (x.quote ? "Báo giá riêng" : x.fee ? money(x.fee) + (x.feeMax > x.fee ? " – " + money(x.feeMax) : "") : "Miễn phí"), sub: x => `${x.examples} · đặt trước ${x.leadDays} ngày`,
       
-      fields: [["name", "Tên đầy đủ", "text"], ["short", "Tên ngắn", "text"], ["fee", "Phí di chuyển / buổi (đ)", "money"], ["perNight", "Phí lưu trú / đêm (đ)", "money"], ["leadDays", "Đặt trước tối thiểu (ngày)", "number"], ["quote", "Báo giá riêng (vé thực tế)", "bool"], ["fullDay", "Chiếm trọn ngày của thám tử", "bool"],
+      fields: [["name", "Tên đầy đủ", "text"], ["short", "Tên ngắn", "text"], ["fee", "Phí di chuyển / buổi (đ)", "money"], ["feeMax", "Phí tối đa (đ), để 0 nếu giá cố định", "money"], ["leadDays", "Đặt trước tối thiểu (ngày)", "number"], ["quote", "Báo giá riêng (vé thực tế)", "bool"], ["fullDay", "Chiếm trọn ngày của thám tử", "bool"],
         ["examples", "Ví dụ khu vực", "text", "full"], ["note", "Ghi chú hiển thị", "text", "full"]] },
   };
 
-  const NAV = [["bookings", "Đơn đặt lịch"], ["studio", "Thông tin team"], ["hero", "Trang chủ"], "—", ["services", "Gói chụp"], ["photographers", "Thám tử ảnh"], ["addons", "Dịch vụ đi kèm"], ["zones", "Phí chụp ngoài tỉnh"], "—", ["account", "Tài khoản"]];
+  COLLECTIONS.staff = { title: "Staff take care", intro: "Người chăm sóc khách trong buổi chụp (hỗ trợ tạo dáng, trang phục, đạo cụ…). Khách chọn khi đặt lịch; giá để 0 là miễn phí, “Để team sắp xếp” không tính tiền. Mỗi staff chỉ nhận một buổi tại một thời điểm.", prefix: "st",
+    blank: () => ({ name: "Staff mới", role: "Take care", phone: "", price: 0, tone: "sage", avatar: "", bio: "", workDays: [0, 1, 2, 3, 4, 5, 6] }),
+    side: x => `${x.price ? "+" + money(x.price) : "Miễn phí"} · ${(x.workDays || []).length} ngày/tuần`, sub: x => `${x.role || "Take care"}${x.phone ? " · " + x.phone : ""}`,
+    fields: [["name", "Tên", "text"], ["role", "Vai trò", "text"], ["phone", "Số điện thoại / Zalo (chỉ admin thấy)", "text"], ["price", "Giá / buổi (đ) — 0 là miễn phí", "money"], ["tone", "Màu ảnh giữ chỗ", "tone"],
+      ["avatar", "Ảnh đại diện", "image", "full"], ["workDays", "Ngày làm việc", "days", "full"], ["bio", "Giới thiệu ngắn (khách thấy)", "textarea", "full"]] };
+
+  const NAV = [["bookings", "Đơn đặt lịch"], ["studio", "Thông tin team"], ["hero", "Trang chủ"], "—", ["services", "Gói chụp"], ["photographers", "Thám tử ảnh"], ["schedule", "Lịch bận thám tử"], ["staff", "Staff take care"], ["addons", "Dịch vụ đi kèm"], ["zones", "Phí chụp ngoài tỉnh"], "—", ["account", "Tài khoản"]];
   function renderNav() {
     const fresh = bookings.filter(b => b.status === "new").length;
     $("#sidenav").innerHTML = NAV.map(n => n === "—" ? "<hr />" : `<button type="button" data-nav="${n[0]}" ${n[0] === section ? 'aria-current="page"' : ""}>${n[1]}${n[0] === "bookings" && fresh ? `<span class="count">${fresh}</span>` : ""}</button>`).join("");
@@ -189,6 +195,7 @@
     if (section === "studio") return renderStudio(c);
     if (section === "hero") return renderHeroPage(c);
     if (section === "account") return renderAccount(c);
+    if (section === "schedule") return renderSchedule(c);
     const cfg = COLLECTIONS[section], list = draft[section];
     const openIds = new Set($$("details.row[open]").map(d => d.dataset.id));
     c.innerHTML = `<div class="page-head"><div><h1>${cfg.title}</h1><p>${cfg.intro}</p></div><button type="button" class="btn btn-primary btn-sm" data-add="${section}">+ Thêm mới</button></div>
@@ -392,7 +399,7 @@
           <div><span class="code">${esc(b.code)}</span> <span class="status st-${b.status}">${STATUS[b.status]}</span>
             <span class="when">${esc(b.date.split("-").reverse().join("/"))} · ${esc(SHIFT_NAMES[b.time] || b.time)}</span><small>${b.minutes} phút · tạo ${new Date(b.createdAt).toLocaleString("vi-VN")}</small></div>
           <div><b>${esc(b.customer.name)}</b> · <a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a>${b.customer.email ? `<small>${esc(b.customer.email)}</small>` : ""}
-            <small>${esc(b.serviceName)} · ${esc(b.photographerName)}</small>
+            <small>${esc(b.serviceName)} · ${esc(b.photographerName)}${b.staffName ? " · Staff: " + esc(b.staffName) : ""}</small>
             <small>${esc(b.zoneName)}${b.address ? " · " + esc(b.address) : ""}${b.nights ? ` · ${b.nights} đêm` : ""}${b.fullDay ? " · khóa trọn ngày" : ""}</small>
             ${b.customer.note ? `<small>Ghi chú khách: “${esc(b.customer.note)}”</small>` : ""}</div>
           <div><span class="money">${money(b.total)}${b.needsQuote ? "*" : ""}</span><small>Cọc ${money(b.deposit)}</small>
@@ -406,13 +413,86 @@
         </article>`).join("") || `<div class="empty">${bookings.length ? "Không có đơn phù hợp bộ lọc." : "Chưa có đơn đặt lịch nào."}</div>`}</div>`;
   }
 
+  /* ---------------- Lịch bận thám tử ----------------
+     Mặc định thám tử RẢNH. Ngày nào có việc riêng thì tích vào (cả ngày / chỉ sáng / chỉ chiều)
+     → khách không đặt được buổi đó. Ngày đã có khách đặt hiện sẵn, không cần tích. Bấm là lưu ngay. */
+  const pad2 = n => String(n).padStart(2, "0");
+  const keyOf = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const BLOCK_LABEL = { day: "Bận cả ngày", morning: "Bận sáng", afternoon: "Bận chiều" };
+  const sched = { pid: null, month: keyOf(new Date()).slice(0, 7), mode: "day", data: null, busy: false };
+  async function loadSchedule() {
+    try { sched.data = await api("/api/admin/blocks"); } catch (e) { toast(e.message); sched.data = { blocks: {}, booked: {} }; }
+    if (section === "schedule") renderSection();
+  }
+  function renderSchedule(c) {
+    const people = saved.photographers || [];
+    if (!people.length) { c.innerHTML = `<div class="page-head"><div><h1>Lịch bận thám tử</h1></div></div><div class="empty">Chưa có thám tử nào. Thêm ở mục Thám tử ảnh.</div>`; return; }
+    if (!people.some(p => p.id === sched.pid)) sched.pid = people[0].id;
+    if (!sched.data) { c.innerHTML = `<div class="page-head"><div><h1>Lịch bận thám tử</h1></div></div><div class="empty">Đang tải lịch…</div>`; loadSchedule(); return; }
+    const ph = people.find(p => p.id === sched.pid);
+    const mine = sched.data.blocks[sched.pid] || {};
+    const [y, m] = sched.month.split("-").map(Number);
+    const first = new Date(y, m - 1, 1), days = new Date(y, m, 0).getDate(), lead = (first.getDay() + 6) % 7; // tuần bắt đầu T2
+    const today = keyOf(new Date()), thisMonth = today.slice(0, 7);
+    const cells = [];
+    for (let i = 0; i < lead; i++) cells.push(`<span class="sc-cell is-blank"></span>`);
+    for (let d = 1; d <= days; d++) {
+      const date = new Date(y, m - 1, d), k = keyOf(date);
+      const past = k < today, off = !(ph.workDays || []).includes(date.getDay());
+      const bk = (sched.data.booked[k] || {})[sched.pid]; // "day" | ["morning", ...]
+      const bkText = !bk ? "" : bk === "day" || bk.length === 2 ? "Có khách cả ngày" : bk[0] === "morning" ? "Có khách sáng" : "Có khách chiều";
+      const v = mine[k];
+      const cls = ["sc-cell", past && "is-past", off && "is-off", v && "is-blocked", bk && "is-booked", k === today && "is-today"].filter(Boolean).join(" ");
+      const note = off ? "Ngày nghỉ" : v ? BLOCK_LABEL[v] : bkText || "Rảnh";
+      cells.push(`<button type="button" class="${cls}" data-sday="${k}" ${past || off ? "disabled" : ""} aria-pressed="${!!v}" aria-label="Ngày ${d}: ${note}${v && bkText ? ", " + bkText : ""}">
+        <span class="sc-num">${d}</span>${v ? `<span class="sc-tick" aria-hidden="true">✓</span>` : ""}
+        <small>${esc(note)}</small>${v && bkText ? `<small class="sc-bk">${bkText}</small>` : ""}</button>`);
+    }
+    const nBlocked = Object.keys(mine).filter(k => k.startsWith(sched.month)).length;
+    c.innerHTML = `<div class="page-head"><div><h1>Lịch bận thám tử</h1><p>Mặc định là <b>rảnh</b>. Ngày nào thám tử có việc riêng thì bấm vào để tích <b>bận</b>, khách sẽ không đặt được. Bấm lần nữa để bỏ tích. Lưu ngay, không cần bấm Lưu.</p></div></div>
+      <div class="panel sc-panel">
+        <div class="toolbar">${people.map(p => `<button type="button" class="chip${p.id === sched.pid ? " is-active" : ""}" data-spid="${esc(p.id)}">${esc(p.name)}</button>`).join("")}</div>
+        <div class="sc-bar">
+          <div class="sc-modes" role="group" aria-label="Kiểu bận khi tích">
+            <span class="hint">Khi tích, đánh dấu:</span>
+            ${Object.entries({ day: "Cả ngày", morning: "Chỉ buổi sáng", afternoon: "Chỉ buổi chiều" }).map(([k, l]) => `<button type="button" class="chip${sched.mode === k ? " is-active" : ""}" data-smode="${k}" aria-pressed="${sched.mode === k}">${l}</button>`).join("")}
+          </div>
+          <div class="sc-month">
+            <button type="button" class="icon-btn" data-smonth="-1" ${sched.month <= thisMonth ? "disabled" : ""} aria-label="Tháng trước">‹</button>
+            <strong>Tháng ${m}/${y}</strong>
+            <button type="button" class="icon-btn" data-smonth="1" aria-label="Tháng sau">›</button>
+          </div>
+        </div>
+        <div class="sc-grid">${["T2", "T3", "T4", "T5", "T6", "T7", "CN"].map(d => `<span class="sc-dow">${d}</span>`).join("")}${cells.join("")}</div>
+        <p class="sc-legend"><span class="lg lg-free"></span>Rảnh <span class="lg lg-blocked"></span>Đã tích bận <span class="lg lg-booked"></span>Có khách đặt <span class="lg lg-off"></span>Ngày nghỉ (đổi ở Thám tử ảnh)
+          · ${esc(ph.name)} có <b>${nBlocked}</b> ngày tích bận trong tháng này</p>
+      </div>`;
+  }
+  async function toggleBlock(date) {
+    if (sched.busy) return;
+    const cur = (sched.data.blocks[sched.pid] || {})[date];
+    const value = cur === sched.mode ? "" : sched.mode;
+    const vn = date.split("-").reverse().join("/");
+    sched.busy = true;
+    try {
+      const r = await api("/api/admin/blocks", { method: "POST", body: JSON.stringify({ pid: sched.pid, date, value }) });
+      sched.data.blocks = r.blocks; renderSection();
+      toast(value ? `${vn}: ${BLOCK_LABEL[value]}` : `${vn}: đã bỏ tích, thám tử rảnh`);
+    } catch (e) { toast(e.message); }
+    finally { sched.busy = false; }
+  }
+
   /* ---------------- Sự kiện ---------------- */
   document.addEventListener("click", async e => {
     // Bấm logo: về trang đầu quản trị (Đơn đặt lịch), cuộn lên đầu — bản nháp chưa lưu vẫn giữ nguyên
     const home = e.target.closest("#adminHome");
     if (home) { e.preventDefault(); go("bookings"); return; }
     const t = e.target.closest("button"); if (!t) return;
-    if (t.dataset.nav) { go(t.dataset.nav); return; }
+    if (t.dataset.nav) { if (t.dataset.nav === "schedule") sched.data = null; go(t.dataset.nav); return; }
+    if (t.dataset.spid) { sched.pid = t.dataset.spid; renderSection(); return; }
+    if (t.dataset.smode) { sched.mode = t.dataset.smode; renderSection(); return; }
+    if (t.dataset.smonth) { const [y, m] = sched.month.split("-").map(Number); sched.month = keyOf(new Date(y, m - 1 + Number(t.dataset.smonth), 1)).slice(0, 7); renderSection(); return; }
+    if (t.dataset.sday) { toggleBlock(t.dataset.sday); return; }
     if (t.dataset.copyText !== undefined) { try { await navigator.clipboard.writeText(t.dataset.copyText); toast("Đã sao chép"); } catch (err) { toast("Không sao chép được, hãy chọn và copy thủ công"); } return; }
     if (t.dataset.payhook) {
       const act = t.dataset.payhook;
