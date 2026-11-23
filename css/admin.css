@@ -207,3 +207,19 @@ body.admin { background: var(--bg); }
 .lg-free { background: var(--surface); } .lg-blocked { background: var(--accent-soft); border-color: var(--accent); }
 .lg-booked { background: #E3EEF9; border-color: #9DB9DA; } .lg-off { background: repeating-linear-gradient(135deg, var(--alt) 0 4px, transparent 4px 8px); }
 @media (max-width: 640px) { .sc-cell { min-height: 56px; padding: 4px 5px; } .sc-cell small { display: none; } .sc-tick { width: 16px; height: 16px; font-size: 11px; top: 4px; right: 4px; } }
+
+/* ---------- Thông báo ---------- */
+.nt-panel .panel-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.nt-badge { width: 34px; height: 34px; border-radius: 10px; display: inline-grid; place-items: center; font-size: 17px; }
+.nt-tg { background: #E1F0FB; color: #229ED9; } .nt-app { background: var(--accent-soft); }
+.nt-on, .nt-off { font: 600 12px var(--font-sans); padding: 3px 10px; border-radius: 999px; }
+.nt-on { background: #DCEFE3; color: #2E7D4F; } .nt-off { background: var(--alt); color: var(--muted); }
+.nt-steps { margin: 0 0 14px; padding-left: 20px; font-size: 14px; line-height: 1.7; color: var(--ink); }
+.nt-steps code { font: 600 12px var(--font-mono); background: var(--alt); padding: 1px 6px; border-radius: 6px; }
+.nt-row { display: flex; gap: 8px; } .nt-row input { flex: 1; min-width: 0; }
+.nt-chats { display: flex; gap: 8px; flex-wrap: wrap; } .nt-chats small { color: var(--muted); font-size: 11px; }
+.nt-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.nt-warn { margin: 0; padding: 10px 14px; border-radius: 10px; background: #FFF4E0; color: #8A5A00; font-size: 14px; }
+.nt-devs { list-style: none; padding: 0; margin: 14px 0 0; border-top: 1px dashed var(--line); }
+.nt-devs li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
+.nt-devs small { color: var(--muted); }

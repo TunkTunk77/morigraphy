@@ -1,0 +1,15 @@
+{
+  "name": "Mori Graphy · Quản trị",
+  "short_name": "Mori Admin",
+  "description": "Quản lý đơn đặt lịch Mori Graphy, nhận thông báo khi có khách đặt.",
+  "lang": "vi",
+  "start_url": "/admin.html#bookings",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F3ECDD",
+  "theme_color": "#15223B",
+  "icons": [
+    { "src": "/assets/brand/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/assets/brand/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

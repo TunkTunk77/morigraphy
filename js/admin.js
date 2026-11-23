@@ -133,7 +133,7 @@
     fields: [["name", "Tên", "text"], ["role", "Vai trò", "text"], ["phone", "Số điện thoại / Zalo (chỉ admin thấy)", "text"], ["price", "Giá / buổi (đ) — 0 là miễn phí", "money"], ["tone", "Màu ảnh giữ chỗ", "tone"],
       ["avatar", "Ảnh đại diện", "image", "full"], ["workDays", "Ngày làm việc", "days", "full"], ["bio", "Giới thiệu ngắn (khách thấy)", "textarea", "full"]] };
 
-  const NAV = [["bookings", "Đơn đặt lịch"], ["studio", "Thông tin team"], ["hero", "Trang chủ"], "—", ["services", "Gói chụp"], ["photographers", "Thám tử ảnh"], ["schedule", "Lịch bận thám tử"], ["staff", "Staff take care"], ["addons", "Dịch vụ đi kèm"], ["zones", "Phí chụp ngoài tỉnh"], "—", ["account", "Tài khoản"]];
+  const NAV = [["bookings", "Đơn đặt lịch"], ["studio", "Thông tin team"], ["hero", "Trang chủ"], "—", ["services", "Gói chụp"], ["photographers", "Thám tử ảnh"], ["schedule", "Lịch bận thám tử"], ["staff", "Staff take care"], ["addons", "Dịch vụ đi kèm"], ["zones", "Phí chụp ngoài tỉnh"], "—", ["notify", "Thông báo"], ["account", "Tài khoản"]];
   function renderNav() {
     const fresh = bookings.filter(b => b.status === "new").length;
     $("#sidenav").innerHTML = NAV.map(n => n === "—" ? "<hr />" : `<button type="button" data-nav="${n[0]}" ${n[0] === section ? 'aria-current="page"' : ""}>${n[1]}${n[0] === "bookings" && fresh ? `<span class="count">${fresh}</span>` : ""}</button>`).join("");
@@ -196,6 +196,7 @@
     if (section === "hero") return renderHeroPage(c);
     if (section === "account") return renderAccount(c);
     if (section === "schedule") return renderSchedule(c);
+    if (section === "notify") return renderNotify(c);
     const cfg = COLLECTIONS[section], list = draft[section];
     const openIds = new Set($$("details.row[open]").map(d => d.dataset.id));
     c.innerHTML = `<div class="page-head"><div><h1>${cfg.title}</h1><p>${cfg.intro}</p></div><button type="button" class="btn btn-primary btn-sm" data-add="${section}">+ Thêm mới</button></div>
@@ -482,13 +483,109 @@
     finally { sched.busy = false; }
   }
 
+  /* ---------------- Thông báo có đơn: Telegram + app trên điện thoại ---------------- */
+  const nt = { data: null, chats: null, bot: "" };
+  const pushReady = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window && window.isSecureContext;
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  function deviceName() {
+    const ua = navigator.userAgent;
+    const os = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Mac OS/.test(ua) ? "Mac" : "Thiết bị";
+    const br = /Edg\//.test(ua) ? "Edge" : /CriOS|Chrome\//.test(ua) ? "Chrome" : /Firefox|FxiOS/.test(ua) ? "Firefox" : /Safari/.test(ua) ? "Safari" : "";
+    return `${os}${br ? " · " + br : ""}${standalone ? " (app)" : ""}`;
+  }
+  async function loadNotify() {
+    try { nt.data = await api("/api/admin/notify"); } catch (e) { toast(e.message); nt.data = { telegram: { token: "", chatIds: [] }, push: { publicKey: "", devices: [] } }; }
+    if (section === "notify") renderSection();
+  }
+  async function thisDeviceEndpoint() {
+    if (!pushReady()) return null;
+    try { const reg = await navigator.serviceWorker.getRegistration("/"); const sub = reg && await reg.pushManager.getSubscription(); return sub ? sub.endpoint : null; } catch (e) { return null; }
+  }
+  function renderNotify(c) {
+    if (!nt.data) { c.innerHTML = `<div class="page-head"><div><h1>Thông báo</h1></div></div><div class="empty">Đang tải…</div>`; loadNotify(); return; }
+    const tg = nt.data.telegram, devs = nt.data.push.devices;
+    const tgOn = !!(tg.token && tg.chatIds.length);
+    const local = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    c.innerHTML = `<div class="page-head"><div><h1>Thông báo</h1><p>Báo ngay khi có khách đặt lịch và khi khách đã chuyển đủ cọc. Bật một hoặc cả hai cách dưới đây.</p></div>
+        <button type="button" class="btn btn-primary btn-sm" data-nt="test" ${tgOn || devs.length ? "" : "disabled"}>Gửi thông báo thử</button></div>
+
+      <div class="panel nt-panel">
+        <h2 class="panel-title"><span class="nt-badge nt-tg">✈</span> Telegram ${tgOn ? `<span class="nt-on">Đang bật</span>` : `<span class="nt-off">Chưa bật</span>`}</h2>
+        <ol class="nt-steps">
+          <li>Trong Telegram, nhắn <b>@BotFather</b> → gửi <code>/newbot</code> → đặt tên (VD <i>Mori Graphy Booking</i>) → nhận <b>mã bot</b> dạng <code>123456789:AAH…</code>, dán vào ô dưới.</li>
+          <li>Mở bot vừa tạo và bấm <b>Start</b> (hoặc thêm bot vào nhóm của team rồi nhắn 1 câu trong nhóm).</li>
+          <li>Bấm <b>Tìm chat</b>, chọn người / nhóm sẽ nhận báo, rồi bấm <b>Lưu Telegram</b>.</li>
+        </ol>
+        <div class="form-grid">
+          <div class="field full"><label for="ntToken">Mã bot Telegram</label>
+            <div class="nt-row"><input id="ntToken" type="text" autocomplete="off" spellcheck="false" value="${esc(tg.token)}" placeholder="123456789:AAH..." style="font-family:var(--font-mono)" />
+            <button type="button" class="btn btn-ghost btn-sm" data-nt="chats">Tìm chat</button></div></div>
+          ${nt.chats ? `<div class="field full"><label>Chat đã nhắn cho bot${nt.bot ? ` @${esc(nt.bot)}` : ""}</label>
+            ${nt.chats.length ? `<div class="nt-chats">${nt.chats.map(ch => `<button type="button" class="chip" data-nt-add="${esc(ch.id)}">+ ${esc(ch.name)} <small>${ch.type === "private" ? "cá nhân" : "nhóm"}</small></button>`).join("")}</div>`
+              : `<p class="hint">Chưa thấy ai nhắn cho bot. Mở bot trong Telegram, bấm Start (hoặc nhắn trong nhóm có bot) rồi bấm Tìm chat lại.</p>`}</div>` : ""}
+          <div class="field full"><label for="ntChats">Chat ID nhận báo (nhiều người: cách nhau dấu phẩy)</label>
+            <input id="ntChats" type="text" autocomplete="off" value="${esc(tg.chatIds.join(", "))}" placeholder="VD 123456789, -1001234567890" style="font-family:var(--font-mono)" /></div>
+        </div>
+        <div class="nt-actions"><button type="button" class="btn btn-primary btn-sm" data-nt="saveTg">Lưu Telegram</button>
+          ${tg.token ? `<button type="button" class="btn btn-ghost btn-sm" data-nt="offTg">Tắt Telegram</button>` : ""}</div>
+      </div>
+
+      <div class="panel nt-panel" style="margin-top:18px">
+        <h2 class="panel-title"><span class="nt-badge nt-app">📱</span> App trên điện thoại ${devs.length ? `<span class="nt-on">${devs.length} thiết bị</span>` : `<span class="nt-off">Chưa có thiết bị</span>`}</h2>
+        <p class="hint" style="margin:0 0 10px">Cài trang quản trị thành app (có icon Mori trên màn hình chính) và nhận thông báo đẩy như app thường. Cần mở web bằng tên miền có <b>https</b>.</p>
+        <ol class="nt-steps">
+          <li><b>Android (Chrome):</b> mở trang quản trị → menu ⋮ → <b>Cài đặt ứng dụng</b> / <b>Thêm vào màn hình chính</b>.</li>
+          <li><b>iPhone (Safari, iOS 16.4+):</b> nút <b>Chia sẻ</b> → <b>Thêm vào MH chính</b> → mở app <b>Mori Admin</b> từ icon (thông báo chỉ bật được bên trong app).</li>
+          <li>Trong app, đăng nhập rồi vào <b>Thông báo</b> → bấm <b>Bật thông báo trên máy này</b> → cho phép.</li>
+        </ol>
+        <div class="nt-device" id="ntDevice">${!window.isSecureContext && !local ? `<p class="nt-warn">Trang đang mở bằng http nên trình duyệt không cho bật thông báo. Mở bằng tên miền https của bạn.</p>`
+          : !pushReady() ? `<p class="nt-warn">${isIOS && !standalone ? "Trên iPhone: hãy Thêm vào MH chính rồi mở bằng icon app trước." : "Trình duyệt này không hỗ trợ thông báo đẩy."}</p>`
+          : `<button type="button" class="btn btn-primary btn-sm" data-nt="subscribe">Bật thông báo trên máy này</button> <span class="hint" id="ntHere"></span>`}</div>
+        ${devs.length ? `<ul class="nt-devs">${devs.map(d => `<li><span>📲 <b>${esc(d.name)}</b> <small>· bật ${new Date(d.createdAt).toLocaleDateString("vi-VN")}</small></span><button type="button" class="link-btn" data-nt-del="${esc(d.id)}">Gỡ</button></li>`).join("")}</ul>` : ""}
+        ${local ? `<p class="hint" style="margin-top:10px">Bạn đang mở bằng ${esc(location.host)}: bật thử được trên máy tính này, còn điện thoại cần web chạy trên tên miền https.</p>` : ""}
+      </div>`;
+    thisDeviceEndpoint().then(ep => { const el = $("#ntHere"); if (el && ep) el.textContent = "Máy này đang nhận thông báo."; });
+  }
+  async function ntAction(act, t) {
+    try {
+      if (act === "chats") {
+        const r = await api("/api/admin/notify", { method: "POST", body: JSON.stringify({ action: "tgchats", token: $("#ntToken").value.trim() }) });
+        nt.chats = r.chats; nt.bot = r.bot; nt.data.telegram.token = $("#ntToken").value.trim(); renderSection(); return;
+      }
+      if (act === "saveTg" || act === "offTg") {
+        const body = act === "offTg" ? { action: "telegram", token: "", chatIds: [] } : { action: "telegram", token: $("#ntToken").value.trim(), chatIds: $("#ntChats").value };
+        nt.data = await api("/api/admin/notify", { method: "POST", body: JSON.stringify(body) }); nt.chats = null; renderSection();
+        toast(act === "offTg" ? "Đã tắt báo qua Telegram" : nt.data.telegram.chatIds.length ? "Đã lưu Telegram, bấm Gửi thông báo thử để kiểm tra" : "Đã lưu mã bot, còn thiếu Chat ID"); return;
+      }
+      if (act === "subscribe") {
+        const perm = await Notification.requestPermission();
+        if (perm !== "granted") return toast("Bạn chưa cho phép thông báo. Mở cài đặt trình duyệt để cho phép.");
+        const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" }); await navigator.serviceWorker.ready;
+        const key = Uint8Array.from(atob(nt.data.push.publicKey.replace(/-/g, "+").replace(/_/g, "/")), ch => ch.charCodeAt(0));
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+        nt.data = await api("/api/admin/notify", { method: "POST", body: JSON.stringify({ action: "subscribe", sub: sub.toJSON(), name: deviceName() }) });
+        renderSection(); toast("Đã bật thông báo trên máy này"); return;
+      }
+      if (act === "test") {
+        t.disabled = true;
+        const r = await api("/api/admin/notify", { method: "POST", body: JSON.stringify({ action: "test" }) });
+        toast(`Đã gửi thử: Telegram ${r.telegram} chat · điện thoại ${r.push} thiết bị`); t.disabled = false; return;
+      }
+    } catch (e) { toast(e.message || String(e)); if (t) t.disabled = false; }
+  }
+
   /* ---------------- Sự kiện ---------------- */
   document.addEventListener("click", async e => {
     // Bấm logo: về trang đầu quản trị (Đơn đặt lịch), cuộn lên đầu — bản nháp chưa lưu vẫn giữ nguyên
     const home = e.target.closest("#adminHome");
     if (home) { e.preventDefault(); go("bookings"); return; }
     const t = e.target.closest("button"); if (!t) return;
-    if (t.dataset.nav) { if (t.dataset.nav === "schedule") sched.data = null; go(t.dataset.nav); return; }
+    if (t.dataset.nav) { if (t.dataset.nav === "schedule") sched.data = null; if (t.dataset.nav === "notify") nt.data = null; go(t.dataset.nav); return; }
+    if (t.dataset.nt) { ntAction(t.dataset.nt, t); return; }
+    if (t.dataset.ntAdd) { const inp = $("#ntChats"); const ids = inp.value.split(/[\s,]+/).filter(Boolean); if (!ids.includes(t.dataset.ntAdd)) ids.push(t.dataset.ntAdd); inp.value = ids.join(", "); return; }
+    if (t.dataset.ntDel) { try { nt.data = await api("/api/admin/notify", { method: "POST", body: JSON.stringify({ action: "unsubscribe", id: t.dataset.ntDel }) }); renderSection(); toast("Đã gỡ thiết bị"); } catch (ex) { toast(ex.message); } return; }
     if (t.dataset.spid) { sched.pid = t.dataset.spid; renderSection(); return; }
     if (t.dataset.smode) { sched.mode = t.dataset.smode; renderSection(); return; }
     if (t.dataset.smonth) { const [y, m] = sched.month.split("-").map(Number); sched.month = keyOf(new Date(y, m - 1 + Number(t.dataset.smonth), 1)).slice(0, 7); renderSection(); return; }

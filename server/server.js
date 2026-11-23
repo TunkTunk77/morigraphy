@@ -22,6 +22,7 @@ const FILES = {
   admin: path.join(DATA_DIR, "admin.json"),
   payhook: path.join(DATA_DIR, "payhook.json"), // khóa bí mật webhook SePay (không công khai)
   blocks: path.join(DATA_DIR, "blocks.json"),   // ngày bận admin tích tay cho từng thám tử
+  notify: path.join(DATA_DIR, "notify.json"),   // Telegram + đăng ký thông báo điện thoại (bí mật)
 };
 const PORT = Number(process.env.PORT || 5173);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -29,7 +30,7 @@ const SESSION_HOURS = 8;
 const PUBLIC_DIRS = ["css", "js", "assets"];
 const PUBLIC_FILES = ["index.html", "admin.html", "favicon.ico", "robots.txt"];
 const MIME = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".avif": "image/avif", ".ico": "image/x-icon", ".woff2": "font/woff2" };
+  ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".avif": "image/avif", ".ico": "image/x-icon", ".woff2": "font/woff2", ".webmanifest": "application/manifest+json" };
 const BOOKING_STATUSES = ["new", "confirmed", "deposited", "done", "cancelled"];
 
 /* ---------------- Lưu trữ JSON (ghi nguyên tử) ---------------- */
@@ -346,6 +347,78 @@ const clientIp = req => {
 function tooManyFails(ip) { const f = loginFails.get(ip); return f && f.count >= 5 && f.until > Date.now(); }
 function noteFail(ip) { const f = loginFails.get(ip); const now = Date.now(); if (!f || f.until < now) loginFails.set(ip, { count: 1, until: now + 15 * 60000 }); else f.count++; }
 
+/* ---------------- Thông báo có đơn (Telegram + app điện thoại) ---------------- */
+const notifier = require("./notify")({ file: FILES.notify, readJSON, writeJSON });
+const SHIFT_VN = { full: "Cả ngày", morning: "Buổi sáng", afternoon: "Buổi chiều" };
+const vnd = n => (Number(n) || 0).toLocaleString("vi-VN") + "đ";
+const dmy = k => String(k || "").split("-").reverse().join("/");
+async function notifySubject() { const st = (await readJSON(FILES.site, {})).studio || {}; return st.email ? "mailto:" + st.email : "mailto:admin@example.com"; }
+function notifyBooking(bk) {
+  const lines = [
+    `📸 ĐƠN ĐẶT LỊCH MỚI · ${bk.code}`,
+    `Khách: ${bk.customer.name} · ${bk.customer.phone}`,
+    `Gói: ${bk.serviceName}`,
+    `Ngày: ${dmy(bk.date)} · ${SHIFT_VN[bk.time] || bk.time}`,
+    `Thám tử: ${bk.photographerName}${bk.staffName ? ` · Staff: ${bk.staffName}` : ""}`,
+    `Nơi chụp: ${bk.zoneName} · ${bk.address}`,
+    `Tổng: ${vnd(bk.total)} · Cọc: ${vnd(bk.deposit)}`,
+    bk.customer.note ? `Ghi chú: ${bk.customer.note}` : "",
+  ].filter(Boolean);
+  notifySubject().then(sub => notifier.send({ title: `Đơn mới ${bk.code}`, body: `${bk.customer.name} · ${bk.serviceName} · ${dmy(bk.date)} ${SHIFT_VN[bk.time] || ""}`, url: "/admin.html#bookings", tag: bk.code, text: lines.join("\n") }, sub));
+}
+/* Bot Telegram: xem lịch khách đã đặt bằng lệnh. Chỉ chat có trong danh sách nhận báo mới xem được. */
+const STATUS_VN = { new: "Mới", confirmed: "Đã xác nhận", deposited: "Đã cọc", done: "Hoàn tất", cancelled: "Đã hủy" };
+const WEEKDAY_VN = ["Chủ nhật", "Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7"];
+// Ngày theo giờ Việt Nam (máy chủ/Docker có thể chạy giờ UTC)
+const vnKey = (offsetDays = 0) => { const d = new Date(Date.now() + 7 * 3600000 + offsetDays * 86400000); return d.toISOString().slice(0, 10); };
+const dayTitle = k => { const d = new Date(k + "T00:00:00Z"); return `📅 ${WEEKDAY_VN[d.getUTCDay()]}, ${dmy(k)}`; };
+const SHIFT_ORDER = { morning: 0, full: 1, afternoon: 2 };
+const bookingLine = b => `• ${SHIFT_VN[b.time] || b.time} · ${b.customer.name} ${b.customer.phone}\n   ${b.serviceName} · ${b.photographerName}${b.staffName ? " + " + b.staffName : ""}\n   📍 ${b.zoneName} · ${b.address}\n   ${b.code} · ${STATUS_VN[b.status] || b.status} · Tổng ${vnd(b.total)}${b.status === "deposited" || b.status === "done" ? "" : " · Cọc " + vnd(b.deposit)}`;
+function listByDay(list, empty) {
+  if (!list.length) return empty;
+  const by = {}; for (const b of list) (by[b.date] ||= []).push(b);
+  return Object.keys(by).sort().map(k => dayTitle(k) + "\n" + by[k].sort((a, c) => (SHIFT_ORDER[a.time] ?? 9) - (SHIFT_ORDER[c.time] ?? 9)).map(bookingLine).join("\n")).join("\n\n");
+}
+const BOT_HELP = "Mori Graphy · xem lịch khách đặt\n\n/homnay  lịch hôm nay\n/mai  lịch ngày mai\n/tuan  lịch 7 ngày tới\n/lich  tất cả lịch sắp tới\n/moi  đơn mới chưa xác nhận\n/don MG-261129-ABCD  chi tiết 1 đơn";
+async function botReply(text, allowed, chatId) {
+  const words = String(text).trim().split(/\s+/), cmd = (words[0] || "").toLowerCase().replace(/@\w+$/, "").replace(/^\//, "");
+  if (!allowed) return `Chat này chưa được phép xem lịch.\nChat ID của bạn: ${chatId}\nNhờ admin thêm ID này ở Admin → Thông báo → Telegram.`;
+  const all = (await readJSON(FILES.bookings, [])).filter(b => b.status !== "cancelled");
+  const today = vnKey(0);
+  const range = (from, to) => all.filter(b => b.date >= from && b.date <= to);
+  switch (cmd) {
+    case "start": case "help": case "menu": case "trogiup": return BOT_HELP;
+    case "homnay": case "today": return listByDay(range(today, today), `Hôm nay (${dmy(today)}) chưa có lịch chụp nào.`);
+    case "mai": case "tomorrow": { const t = vnKey(1); return listByDay(range(t, t), `Ngày mai (${dmy(t)}) chưa có lịch chụp nào.`); }
+    case "tuan": case "week": return listByDay(range(today, vnKey(6)), "7 ngày tới chưa có lịch chụp nào.");
+    case "lich": case "sap": case "saptoi": {
+      const up = range(today, "9999-12-31"); const shown = up.slice().sort((a, c) => a.date.localeCompare(c.date)).slice(0, 40);
+      return listByDay(shown, "Chưa có lịch chụp nào sắp tới.") + (up.length > shown.length ? `\n\n… còn ${up.length - shown.length} đơn nữa, xem trong trang admin.` : "");
+    }
+    case "moi": case "new": {
+      const fresh = all.filter(b => b.status === "new").sort((a, c) => a.date.localeCompare(c.date));
+      return fresh.length ? `🆕 ${fresh.length} đơn mới chưa xác nhận\n\n` + listByDay(fresh, "") : "Không có đơn mới nào đang chờ xác nhận. 👍";
+    }
+    case "don": case "order": {
+      const q = (words[1] || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (!q) return "Gõ kèm mã đơn, ví dụ: /don MG-261129-ABCD";
+      const b = (await readJSON(FILES.bookings, [])).find(x => x.code.replace(/-/g, "") === q || x.code.replace(/-/g, "").endsWith(q));
+      if (!b) return `Không tìm thấy đơn ${words[1]}.`;
+      const paid = (b.payments || []).reduce((s, p) => s + p.amount, 0);
+      return [`📄 ${b.code} · ${STATUS_VN[b.status] || b.status}`, `Khách: ${b.customer.name} · ${b.customer.phone}${b.customer.email ? " · " + b.customer.email : ""}`,
+        `Ngày: ${dayTitle(b.date).slice(3)} · ${SHIFT_VN[b.time] || b.time}`, `Gói: ${b.serviceName}`, `Thám tử: ${b.photographerName}${b.staffName ? " · Staff: " + b.staffName : ""}`,
+        `Nơi chụp: ${b.zoneName} · ${b.address}`, ...(b.lines || []).map(([k, v]) => `  ${k}: ${vnd(v)}`), `Tổng: ${vnd(b.total)} · Cọc: ${vnd(b.deposit)}${paid ? ` · Đã nhận: ${vnd(paid)}` : ""}`,
+        b.customer.note ? `Ghi chú khách: ${b.customer.note}` : "", b.adminNote ? `Ghi chú nội bộ: ${b.adminNote}` : ""].filter(Boolean).join("\n");
+    }
+    default: return "Mình chưa hiểu lệnh này.\n\n" + BOT_HELP;
+  }
+}
+
+function notifyDeposit(bk, amount) {
+  const text = `💰 ĐÃ NHẬN CỌC · ${bk.code}\nKhách: ${bk.customer.name} · ${bk.customer.phone}\nVừa nhận: ${vnd(amount)} (đủ cọc ${vnd(bk.deposit)})\nNgày chụp: ${dmy(bk.date)} · ${SHIFT_VN[bk.time] || bk.time}`;
+  notifySubject().then(sub => notifier.send({ title: `Đã nhận cọc ${bk.code}`, body: `${bk.customer.name} · ${vnd(amount)}`, url: "/admin.html#bookings", tag: bk.code + "-coc", text }, sub));
+}
+
 /* ---------------- HTTP helpers ---------------- */
 const SEC_HEADERS = { "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY" };
 function send(res, status, body, headers = {}) {
@@ -418,6 +491,7 @@ async function serveStatic(req, res, pathname, versioned = false) {
   let rel = decodeURIComponent(pathname).replace(/^\/+/, "");
   if (rel === "" ) rel = "index.html";
   if (rel === "admin") rel = "admin.html";
+  if (rel === "sw.js") rel = "js/sw.js"; // service worker của app quản trị cần nằm ở gốc trang
   const top = rel.split("/")[0];
   // Ảnh tải lên: /uploads/<tên-ngẫu-nhiên>.<đuôi> → data/uploads/
   if (top === "uploads") {
@@ -488,7 +562,7 @@ async function sepayWebhook(req, res) {
     const txId = String(t.id ?? t.referenceCode ?? "");
     if (txId && bk.payments.some(x => x.txId === txId)) return send(res, 200, { success: true, duplicate: true });
     bk.payments.push({ txId, amount, at: new Date().toISOString(), bank: clean(String(t.gateway || ""), 40), account: clean(String(t.accountNumber || ""), 30), via: "sepay" });
-    if (paidOf(bk) >= (bk.deposit || 0) && (bk.status === "new" || bk.status === "confirmed")) { bk.status = "deposited"; bk.depositedAt = new Date().toISOString(); }
+    if (paidOf(bk) >= (bk.deposit || 0) && (bk.status === "new" || bk.status === "confirmed")) { bk.status = "deposited"; bk.depositedAt = new Date().toISOString(); notifyDeposit(bk, amount); }
     bk.updatedAt = new Date().toISOString(); await writeJSON(FILES.bookings, all);
     console.log(`• SePay: ${code} nhận ${amount}đ → ${bk.status}`);
     return send(res, 200, { success: true, matched: true, status: bk.status });
@@ -533,6 +607,7 @@ async function createBooking(b, res) {
       addons: q.addons, products: q.products, lines: q.lines, total: q.total, deposit: q.deposit, needsQuote: q.needsQuote, customer, adminNote: "",
       transferNote: transferNote(code), payTo: payToFor(site, ph), viewToken: crypto.randomBytes(16).toString("hex"), payments: [] };
     all.push(booking); await writeJSON(FILES.bookings, all);
+    notifyBooking(booking); // không chờ: gửi thông báo chậm cũng không làm khách đợi
     return send(res, 201, { code, total: q.total, deposit: q.deposit, photographerId: ph.id, photographerName: ph.name, staffName: booking.staffName, transferNote: booking.transferNote, payTo: booking.payTo, viewToken: booking.viewToken });
 }
 
@@ -622,6 +697,34 @@ async function adminApi(req, res, p, method) {
       return send(res, 200, { blocks: all });
     });
   }
+  // Thông báo có đơn: Telegram + thiết bị đã bật thông báo
+  if (p === "/api/admin/notify" && method === "GET") return send(res, 200, await notifier.status());
+  if (p === "/api/admin/notify" && method === "POST") {
+    const b = await readBody(req, 10000);
+    if (b.action === "telegram") {
+      const token = String(b.token || "").trim(), chatIds = [...new Set((Array.isArray(b.chatIds) ? b.chatIds : String(b.chatIds || "").split(/[\s,]+/)).map(x => String(x).trim()).filter(Boolean))];
+      if (token && !/^\d{5,}:[A-Za-z0-9_-]{30,}$/.test(token)) return send(res, 400, { error: "Mã bot Telegram không đúng dạng (VD 123456789:AAH...)" });
+      if (chatIds.some(x => !/^(-?\d{3,20}|@[A-Za-z0-9_]{4,40})$/.test(x)) || chatIds.length > 10) return send(res, 400, { error: "Chat ID không hợp lệ" });
+      await notifier.saveTelegram(token, chatIds); return send(res, 200, await notifier.status());
+    }
+    if (b.action === "tgchats") {
+      const token = String(b.token || "").trim();
+      if (!/^\d{5,}:[A-Za-z0-9_-]{30,}$/.test(token)) return send(res, 400, { error: "Nhập mã bot Telegram trước" });
+      try { return send(res, 200, await notifier.telegramChats(token)); } catch (e) { return send(res, 400, { error: "Telegram: " + e.message }); }
+    }
+    if (b.action === "subscribe") {
+      const sb = b.sub || {};
+      if (!/^https:\/\/[^\s]{10,800}$/.test(String(sb.endpoint || "")) || !sb.keys || !/^[A-Za-z0-9_-]{80,100}$/.test(String(sb.keys.p256dh || "")) || !/^[A-Za-z0-9_-]{16,30}$/.test(String(sb.keys.auth || ""))) return send(res, 400, { error: "Đăng ký thông báo không hợp lệ" });
+      await notifier.subscribe({ endpoint: sb.endpoint, keys: { p256dh: sb.keys.p256dh, auth: sb.keys.auth } }, clean(String(b.name || "Thiết bị"), 60));
+      return send(res, 200, await notifier.status());
+    }
+    if (b.action === "unsubscribe") { await notifier.unsubscribe(String(b.id || "")); return send(res, 200, await notifier.status()); }
+    if (b.action === "test") {
+      const r = await notifier.send({ title: "Thử thông báo Mori Graphy", body: "Nếu bạn thấy tin này, thông báo đã hoạt động 🎉", url: "/admin.html#bookings", tag: "test", text: "🔔 Thử thông báo Mori Graphy: nếu bạn thấy tin này là đã hoạt động." }, await notifySubject());
+      return send(res, 200, r);
+    }
+    return send(res, 400, { error: "Thao tác không hợp lệ" });
+  }
   if (p === "/api/admin/payhook" && method === "GET") { const h = await readJSON(FILES.payhook, null); return send(res, 200, { apiKey: h?.apiKey || "", path: "/api/webhooks/sepay" }); }
   if (p === "/api/admin/payhook" && method === "POST") {
     const b = await readBody(req, 1000);
@@ -691,6 +794,7 @@ async function main() {
       else { console.error(e); send(res, 500, { error: "Lỗi máy chủ" }); }
     }
   }).listen(PORT, HOST, () => console.log(`MoriGraphy đang chạy: http://localhost:${PORT}  ·  Admin: http://localhost:${PORT}/admin.html`));
+    notifier.startBot(botReply); // bot Telegram trả lời lệnh xem lịch (nếu đã nhập mã bot)
   setInterval(() => { const now = Date.now(); for (const [t, s] of sessions) if (s.expires < now) sessions.delete(t); }, 600000).unref();
   // Dừng êm (Docker/systemd gửi SIGTERM): ngừng nhận request, chờ ghi file xong rồi thoát
   const shutdown = sig => {
