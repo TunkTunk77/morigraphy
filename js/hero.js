@@ -30,8 +30,8 @@
       sub: "Bấm “Thêm vào hồ sơ” để đưa vào đơn đặt lịch, hoặc chọn lại ở bước 4." },
     travel: { eyebrow: "Hồ sơ 04 — Chụp ngoài tỉnh", title: "Thám tử đi “hiện trường”",
       sub: "Team không có studio cố định — chúng tôi đến tận nơi. Phí di chuyển tính theo khu vực, cộng vào đơn ở bước 3." },
-    booking: { eyebrow: "Hồ sơ 05 — Đặt lịch", title: "Mở hồ sơ đặt lịch", sub: "5 bước. Team gọi xác nhận trong vòng 2 giờ làm việc." },
-    cta: { title: "Bạn có một khoảnh khắc cần điều tra?", sub: "5 bước đơn giản · Team gọi xác nhận trong 2 giờ làm việc · Đặt cọc {coc}%", btn: "Mở hồ sơ ngay →" },
+    booking: { eyebrow: "Hồ sơ 05 — Đặt lịch", title: "Mở hồ sơ đặt lịch", sub: "Điền 1 form. Team gọi xác nhận trong vòng 2 giờ làm việc." },
+    cta: { title: "Bạn có một khoảnh khắc cần điều tra?", sub: "Điền 1 form · Team gọi xác nhận trong 2 giờ làm việc · Đặt cọc {coc}%", btn: "Mở hồ sơ ngay →" },
     contact: { eyebrow: "Liên hệ", title: "Gọi cho đội thám tử",
       sub: "{team} là team nhiếp ảnh di động, không có studio cố định. Chúng tôi đến chụp tại địa điểm bạn chọn: nhà riêng, quán cà phê, công viên, văn phòng, trường học…" },
   };

@@ -530,3 +530,57 @@ main { min-height: 70vh; }
 .tv-price strong { font-weight: 800; color: var(--accent); white-space: nowrap; }
 .tv-price small { font-size: 12px; }
 @media (max-width: 480px) { .tv-list li { padding: 12px 14px; } .tv-price strong { white-space: normal; } }
+
+/* ===== Form đặt lịch 1 trang ===== */
+.booking-card .bk-form { display: flex; flex-direction: column; gap: 22px; }
+.bk-form .field > label, .bk-form .field > .label { font-size: 15px; font-weight: 600; color: var(--ink); }
+.bk-form .field > .label small { font-weight: 400; color: var(--muted); }
+.bk-form .field input, .bk-form .field select, .bk-form .field textarea { padding: 14px 16px; font-size: 16px; border-radius: 14px; }
+.bk-form .field select { appearance: none; -webkit-appearance: none; padding-right: 42px; text-overflow: ellipsis;
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='18' viewBox='0 0 12 18'%3E%3Cpath d='M2 7l4-4 4 4M2 11l4 4 4-4' fill='none' stroke='%2315223B' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 16px center; }
+.bk-form .field .err:empty { display: none; }
+.bk-pick { display: flex; align-items: center; gap: 12px; }
+.bk-pick .opt-avatar { flex: none; overflow: hidden; }
+.bk-pick .opt-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.bk-pick select { flex: 1; min-width: 0; }
+.bk-link { align-self: flex-start; font-size: 13px; }
+/* Cả ngày / Nửa ngày */
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.seg-sub { margin-top: 10px; }
+.seg-btn { min-height: 58px; padding: 10px 12px; border-radius: 14px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer;
+  font: 600 17px/1.2 var(--font-serif); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  transition: background var(--dur-quick) var(--ease), border-color var(--dur-quick) var(--ease), color var(--dur-quick) var(--ease); }
+.seg-btn small { font: 400 12px var(--font-sans, inherit); color: var(--muted); }
+.seg-btn:hover:not(:disabled) { border-color: var(--ink); }
+.seg-btn.is-on { background: var(--ink); border-color: var(--ink); color: var(--surface); }
+.seg-btn.is-on small { color: inherit; opacity: .8; }
+.seg-sub .seg-btn { min-height: 48px; font-size: 15px; }
+.seg-sub .seg-btn.is-on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.seg-btn:disabled { opacity: .45; cursor: not-allowed; }
+/* Số người */
+.people-box { border: 1.5px solid var(--ink); border-radius: 18px; padding: 20px 22px 16px; background: var(--surface); }
+.people-title { font: 700 20px/1.2 var(--font-serif); margin: 0 0 14px; }
+.people-box input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); height: 28px; cursor: pointer; }
+.people-ticks { display: flex; justify-content: space-between; padding: 4px 6px 0; font: 500 14px var(--font-mono); color: var(--muted); }
+.people-box .hint { display: block; margin: 12px 0 0; font-size: 13px; color: var(--muted); }
+/* Buổi tối, dịch vụ thêm */
+.ev-check { font-size: 15px; align-items: center; }
+.ev-check input { width: 22px; height: 22px; margin: 0; flex: none; }
+.ev-check small { display: block; font-size: 12px; color: var(--muted); }
+.ev-check.is-off { opacity: .6; cursor: not-allowed; }
+.bk-addons { display: grid; gap: 8px; }
+.bk-addon { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 14px; }
+.bk-addon.is-on { border-color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 35%, var(--surface)); }
+.bk-addon b { display: block; font-size: 14px; }
+.bk-addon small { font-size: 12px; color: var(--muted); }
+.bk-form #calendar { max-width: 100%; }
+.bk-form .cal-grid { grid-template-columns: repeat(7, minmax(0, 46px)); }
+#stepNav { flex-direction: column; align-items: stretch; }
+#stepNav #btnNext { width: 100%; min-height: 54px; font-size: 17px; }
+#stepNav .step-error:empty { display: none; }
+@media (max-width: 640px) {
+  .booking-card { padding: 22px 18px 20px; }
+  .bk-form .cal-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+  .bk-form .cal-day { height: 40px; }
+  .seg { gap: 10px; }
+}

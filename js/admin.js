@@ -91,7 +91,7 @@
   let saved = null, draft = null, bookings = [], section = "studio", dirty = false;
 
   async function enterApp(user) {
-    saved = await api("/api/admin/data"); saved.staff ||= []; draft = clone(saved);
+    saved = await api("/api/admin/data"); saved.staff ||= []; saved.evening = Object.assign({ end: "20:00", price: 500000 }, saved.evening); draft = clone(saved);
     $("#who").textContent = "Đăng nhập: " + user;
     $("#authView").hidden = true; $("#appView").hidden = false;
     await loadBookings(false);
@@ -106,8 +106,8 @@
   const COLLECTIONS = {
     services: { title: "Gói chụp", intro: "Giá, thời lượng và nội dung các gói. Gói dài hơn nửa buổi thì khách chỉ chọn được “Cả ngày”.", prefix: "sv",
       blank: () => ({ name: "Gói mới", category: "Cá nhân", duration: 60, price: 1000000, tone: "stone", desc: "", includes: [] }),
-      side: x => money(x.price), sub: x => `${x.category} · ${x.duration} phút`,
-      fields: [["name", "Tên gói", "text"], ["category", "Danh mục", "text"], ["tone", "Màu ảnh giữ chỗ", "tone"], ["price", "Giá (đ)", "money"], ["duration", "Thời lượng (phút)", "number"],
+      side: x => x.priceFull > 0 ? `${money(x.price)} · cả ngày ${money(x.priceFull)}` : money(x.price), sub: x => `${x.category} · ${x.duration} phút`,
+      fields: [["name", "Tên gói", "text"], ["category", "Danh mục", "text"], ["tone", "Màu ảnh giữ chỗ", "tone"], ["price", "Giá nửa ngày (đ)", "money"], ["priceFull", "Giá cả ngày (đ) — 0 là giống nửa ngày", "money"], ["pricePerPerson", "Giá thêm mỗi người, từ người thứ 2 (đ) — 0 là không đổi", "money"], ["duration", "Thời lượng (phút)", "number"],
         ["desc", "Mô tả ngắn", "textarea", "full"], ["includes", "Bao gồm (mỗi dòng một ý)", "lines", "full"]] },
     photographers: { title: "Thám tử ảnh", intro: "Thông tin thợ, ngày làm việc, các gói nhận chụp và phụ phí khi khách chọn đích danh.", prefix: "ph",
       blank: () => ({ name: "Thám tử mới", phone: "", role: "Thám tử", years: 1, rating: 5, reviews: 0, surcharge: 0, tone: "stone", specialties: [], style: "", bio: "", workDays: [1, 2, 3, 4, 5, 6], services: [], avatar: "", portfolio: [] }),
@@ -235,6 +235,8 @@
           return `<div class="field"><label for="sh-${k}-s">${l}: bắt đầu</label><input id="sh-${k}-s" type="time" step="900" data-path="shifts.${k}.start" data-type="text" value="${esc(v.start || "")}" /></div>
             <div class="field"><label for="sh-${k}-e">${l}: kết thúc</label><input id="sh-${k}-e" type="time" step="900" data-path="shifts.${k}.end" data-type="text" value="${esc(v.end || "")}" /></div>`; }).join("")}
         ${input("bookingWindowDays", "Mở lịch trước tối đa (ngày)", "number", draft.bookingWindowDays)}
+        <div class="field"><label for="ev-end">Chụp thêm buổi tối: đến mấy giờ</label><input id="ev-end" type="time" step="900" data-path="evening.end" data-type="text" value="${esc((draft.evening || {}).end || "20:00")}" /></div>
+        ${input("evening.price", "Giá chụp thêm buổi tối (đ) — 0 là không nhận", "money", (draft.evening || {}).price ?? 500000)}
       </div></div>
       ${paymentPanel()}
       <div class="page-head" style="margin-top:28px"><div><h1 style="font-size:24px">Tự động xác nhận cọc (SePay)</h1>
@@ -398,7 +400,7 @@
       <div class="bk-list">${list.map(b => `
         <article class="bk">
           <div><span class="code">${esc(b.code)}</span> <span class="status st-${b.status}">${STATUS[b.status]}</span>
-            <span class="when">${esc(b.date.split("-").reverse().join("/"))} · ${esc(SHIFT_NAMES[b.time] || b.time)}</span><small>${b.minutes} phút · tạo ${new Date(b.createdAt).toLocaleString("vi-VN")}</small></div>
+            <span class="when">${esc(b.date.split("-").reverse().join("/"))} · ${esc(SHIFT_NAMES[b.time] || b.time)}${b.evening ? " + tối" : ""} · ${b.people || 1} người</span><small>${b.minutes} phút · tạo ${new Date(b.createdAt).toLocaleString("vi-VN")}</small></div>
           <div><b>${esc(b.customer.name)}</b> · <a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a>${b.customer.email ? `<small>${esc(b.customer.email)}</small>` : ""}
             <small>${esc(b.serviceName)} · ${esc(b.photographerName)}${b.staffName ? " · Staff: " + esc(b.staffName) : ""}</small>
             <small>${esc(b.zoneName)}${b.address ? " · " + esc(b.address) : ""}${b.nights ? ` · ${b.nights} đêm` : ""}${b.fullDay ? " · khóa trọn ngày" : ""}</small>

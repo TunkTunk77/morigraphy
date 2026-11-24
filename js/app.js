@@ -13,7 +13,7 @@
     const d = await (window.__MG_DATA || fetch("/api/data", { cache: "no-store" }).then(r => r.ok ? r.json() : null));
     if (d) {
       Object.assign(window, { HERO: d.hero || window.HERO, SECTIONS: d.sections || {}, STUDIO: d.studio, CATEGORIES: d.categories, SERVICES: d.services, PHOTOGRAPHERS: d.photographers, STAFF: d.staff || [], ADDONS: d.addons,
-        PRODUCTS: d.products, TRAVEL_ZONES: d.zones, SHIFTS: d.shifts || window.SHIFTS, BOOKING_WINDOW_DAYS: d.bookingWindowDays });
+        PRODUCTS: d.products, TRAVEL_ZONES: d.zones, SHIFTS: d.shifts || window.SHIFTS, BOOKING_WINDOW_DAYS: d.bookingWindowDays, EVENING: d.evening });
       HAS_API = true;
     }
   } catch (e) { /* chạy tĩnh */ }
@@ -58,8 +58,8 @@
   /* ---------------- State (lưu nháp trong trình duyệt) ---------------- */
   const DRAFT_KEY = "mg_draft_v1";
   const blank = () => ({
-    step: 1, maxStep: 1, serviceId: null, photographerId: null, staffId: "any", zoneId: ZONES[0].id, nights: 0, address: "",
-    date: null, time: null, calMonth: null, addons: {}, products: {},
+    step: 1, serviceId: null, photographerId: "any", staffId: "any", zoneId: ZONES[0].id, nights: 0, address: "",
+    date: null, time: "full", people: 1, evening: false, calMonth: null, addons: {}, products: {},
     customer: { name: "", phone: "", email: "", note: "", agree: false },
   });
   let state = blank();
@@ -69,7 +69,8 @@
   if (!ZONES.some(z => z.id === state.zoneId)) state.zoneId = ZONES[0].id;
   state.products = {}; // mục Sản phẩm đã bỏ — xóa lựa chọn cũ trong bản nháp
   for (const id of Object.keys(state.addons)) if (!ADDONS.some(a => a.id === id)) delete state.addons[id];
-  if (state.photographerId && state.photographerId !== "any" && !phById(state.photographerId)) state.photographerId = null;
+  if (!state.photographerId || (state.photographerId !== "any" && !phById(state.photographerId))) state.photographerId = "any";
+  state.people = Math.min(9, Math.max(1, Number(state.people) || 1));
   if (state.serviceId && !svcById(state.serviceId)) state.serviceId = null;
   if (!state.staffId || (state.staffId !== "any" && !stById(state.staffId))) state.staffId = "any";
   const save = () => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(state)); } catch (e) { /* bỏ qua */ } };
@@ -136,14 +137,24 @@
   }
 
   /* ---------------- Giá ---------------- */
+  // Giá gói theo buổi (cùng quy tắc với server). Chưa chọn buổi: gói/địa điểm chỉ nhận cả ngày thì tính giá cả ngày
+  function svcPrice(s) {
+    if (!(s.priceFull > 0)) return { v: s.price, label: "Giá gói" };
+    const full = state.time ? state.time === "full" : !SHIFT_LIST.some(x => x.id !== "full" && shiftFits(x.id));
+    return full ? { v: s.priceFull, label: "Giá gói · cả ngày" } : { v: s.price, label: "Giá gói · nửa ngày" };
+  }
+  const priceText = s => s.priceFull > 0 ? `${money(s.price)} – ${money(s.priceFull)}` : money(s.price);
   function quote() {
     const s = svcById(state.serviceId), z = zoneById(state.zoneId);
     const rows = []; let total = 0;
-    if (s) { rows.push(["Giá gói", s.price]); total += s.price; }
+    if (s) { const sp = svcPrice(s); rows.push([sp.label, sp.v]); total += sp.v; }
     const p = state.photographerId && state.photographerId !== "any" ? phById(state.photographerId) : null;
     if (p && p.surcharge) { rows.push(["Phụ phí chọn thám tử", p.surcharge]); total += p.surcharge; }
     const stp = state.staffId && state.staffId !== "any" ? stById(state.staffId) : null;
     if (stp && stp.price) { rows.push([`Staff take care · ${stp.name}`, stp.price]); total += stp.price; }
+    const n = state.people || 1;
+    if (s && n > 1 && s.pricePerPerson > 0) { const v = s.pricePerPerson * (n - 1); rows.push([`Thêm ${n - 1} người`, v]); total += v; }
+    if (state.evening && EV.price > 0) { rows.push([`Chụp thêm buổi tối đến ${EV.end}`, EV.price]); total += EV.price; }
     if (z.fee) { rows.push([`Phí di chuyển · ${z.short}${z.feeMax > z.fee ? " (mức thấp)" : ""}`, z.fee]); total += z.fee; }
     if (z.perNight && state.nights) { const v = z.perNight * state.nights; rows.push([`Lưu trú ekip × ${state.nights} đêm`, v]); total += v; }
     for (const a of ADDONS) { const q = state.addons[a.id] || 0; if (q) { rows.push([`${a.name} × ${q}`, a.price * q]); total += a.price * q; } }
@@ -226,7 +237,7 @@
           <h3>${s.name}</h3>
           <p class="card-desc">${s.desc}</p>
           <ul class="card-list">${(s.includes || []).map(i => `<li>${i}</li>`).join("")}</ul>
-          <div class="card-foot"><span class="price">${money(s.price)}<small>${s.duration} phút</small></span>
+          <div class="card-foot"><span class="price">${s.priceFull > 0 ? `${money(s.price)}<small>nửa ngày · ${s.duration} phút</small><br />${money(s.priceFull)}<small>cả ngày</small>` : `${money(s.price)}<small>${s.duration} phút</small>`}</span>
             <button type="button" class="btn btn-primary btn-sm" data-pick-service="${s.id}">Chọn gói</button></div>
         </div></article>`;
     }).join("");
@@ -310,90 +321,143 @@
   }
 
   /* ---------------- Đặt lịch ---------------- */
-  const STEPS = ["Gói chụp", "Thám tử ảnh", "Địa điểm & thời gian", "Dịch vụ đi kèm", "Thông tin"];
-  const view = $("#stepView"), errEl = $("#stepError"), btnNext = $("#btnNext"), btnBack = $("#btnBack");
+  /* ---------------- Form đặt lịch (gom 1 trang) ---------------- */
+  const view = $("#stepView"), errEl = $("#stepError"), btnNext = $("#btnNext");
+  // Chụp thêm buổi tối (admin cài giá; 0 = không nhận) và số người tối đa
+  const EV = Object.assign({ end: "20:00", price: 500000 }, window.EVENING);
+  const MAX_PEOPLE = 9;
+  const halfAllowed = () => SHIFT_LIST.some(s => s.id !== "full" && shiftFits(s.id));
+  const isHalf = () => state.time === "morning" || state.time === "afternoon";
+  const eveningOk = () => EV.price > 0 && state.time !== "morning";
 
-  function renderStepper() {
-    $("#stepper").innerHTML = STEPS.map((l, i) => {
-      const n = i + 1, done = state.step === "done" || n < state.step, active = n === state.step;
-      const cls = done ? "is-done" : active ? "is-active" : "";
-      const inner = `<span class="dot">${done ? "✓" : n}</span><span class="label">${l}</span>`;
-      const canJump = state.step !== "done" && n <= state.maxStep && !active;
-      return `<li class="${cls}" ${active ? 'aria-current="step"' : ""}>${canJump ? `<button type="button" data-goto="${n}">${inner}</button>` : inner}</li>`;
-    }).join("");
+  // Hộp chọn buổi: Cả ngày / Nửa ngày (→ sáng / chiều). Buổi đã kín ngày đang chọn thì mờ.
+  function renderShift() {
+    const box = $("#shiftBox"); if (!box) return;
+    const s = svcById(state.serviceId), mins = totalMinutes(), z = zoneById(state.zoneId), canHalf = halfAllowed();
+    const open = id => (!state.date || slotOpen(state.date, id, mins)) && shiftFits(id, mins);
+    const full = shiftById("full"), two = s && s.priceFull > 0;
+    const btn = (attr, val, on, ok, label, sub) => `<button type="button" class="seg-btn${on ? " is-on" : ""}" data-${attr}="${val}" aria-pressed="${on}" ${ok ? "" : "disabled"}>${label}<small>${sub}</small></button>`;
+    box.innerHTML = `<div class="seg">
+        ${btn("time", "full", state.time === "full", open("full"), "Cả ngày", two ? money(s.priceFull) : `${full.start} – ${full.end}`)}
+        ${btn("mode", "half", isHalf(), canHalf && (open("morning") || open("afternoon")), "Nửa ngày", two ? money(s.price) : "Sáng hoặc chiều")}
+      </div>
+      ${isHalf() ? `<div class="seg seg-sub">${["morning", "afternoon"].map(id => { const sh = shiftById(id); return btn("time", id, state.time === id, open(id), sh.label, `${sh.start} – ${sh.end}`); }).join("")}</div>` : ""}
+      <p class="hint">${z.fullDay ? "Chụp đi tỉnh chỉ nhận lịch cả ngày."
+        : !canHalf ? `Gói này cần khoảng ${Math.ceil(mins / 60)} tiếng nên chỉ nhận lịch cả ngày.`
+        : state.date ? "Nút mờ là buổi đó đã kín lịch trong ngày bạn chọn." : `Cả ngày ${full.start} – ${full.end}, nghỉ trưa ${SH.morning.end} – ${SH.afternoon.start}.`}</p>`;
+  }
+  const modeText = () => state.time === "full" ? "cả ngày" : isHalf() ? (shiftById(state.time).label.toLowerCase()) : "chưa chọn buổi";
+  function renderPeopleTitle() { const t = $("#peopleTitle"); if (t) t.textContent = `${state.people} người · ${modeText()}`; }
+  function renderEvening() {
+    const box = $("#eveningBox"); if (!box) return;
+    if (!(EV.price > 0)) { box.innerHTML = ""; return; }
+    const ok = eveningOk(); if (!ok) state.evening = false;
+    box.innerHTML = `<label class="check ev-check${ok ? "" : " is-off"}"><input type="checkbox" name="evening" ${state.evening ? "checked" : ""} ${ok ? "" : "disabled"} />
+      <span>Chụp thêm buổi tối đến ${EV.end.replace(":00", "h")} (+${money(EV.price)})${ok ? "" : `<small>Chỉ nhận khi chụp cả ngày hoặc buổi chiều.</small>`}</span></label>`;
+  }
+  function renderDateNote() { const n = $("#dateNote"); if (n) n.textContent = state.date ? `Đã chọn: ${dateLabel(state.date)}` : "Ngày mờ là đã kín lịch hoặc thám tử nghỉ."; }
+  // Vẽ lại các phần phụ thuộc ngày / buổi (không vẽ lại cả form để không mất chỗ đang gõ)
+  function renderSlots() { renderShift(); renderPeopleTitle(); renderEvening(); renderDateNote(); }
+  function renderAddons() {
+    const box = $("#addonBox"); if (!box) return;
+    box.innerHTML = ADDONS.map(a => { const q = state.addons[a.id] || 0;
+      return `<div class="bk-addon${q ? " is-on" : ""}"><span><b>${esc(a.name)}</b><small>${money(a.price)} / ${esc(a.unit)}</small></span>${qtyHTML("addon", a.id, q, a.max)}</div>`; }).join("");
   }
 
-  function option({ name, value, checked, disabled, title, sub, side, lead }) {
-    return `<label class="option${disabled ? " is-disabled" : ""}">
-      <input type="radio" name="${name}" value="${value}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
-      ${lead || '<span class="radio" aria-hidden="true"></span>'}
-      <span><span class="opt-title">${title}</span><br /><span class="opt-sub">${sub || ""}</span></span>
-      <span class="opt-side">${side || ""}</span></label>`;
+  function renderForm() {
+    const s = svcById(state.serviceId), z = zoneById(state.zoneId), c = state.customer, el = eligible();
+    const f = (id, label, type, val, ph, extra = "", hint = "") => `<div class="field" data-field="${id}"><label for="f_${id}">${label}</label>
+      <input id="f_${id}" name="${id}" type="${type}" value="${esc(val)}" placeholder="${ph}" ${extra} />${hint ? `<span class="hint">${hint}</span>` : ""}<span class="err"></span></div>`;
+    const avatar = x => x && x.avatar ? `<img src="${x.avatar}" alt="" />` : x ? initials(x.name) : "?";
+    const pickPh = state.photographerId && state.photographerId !== "any" ? phById(state.photographerId) : null;
+    view.innerHTML = `<div class="bk-form">
+      <div class="field" data-field="service"><label for="f_service">Gói chụp</label>
+        <select id="f_service" name="service"><option value="" ${s ? "" : "selected"} disabled>Chọn gói chụp…</option>
+          ${SERVICES.map(x => `<option value="${x.id}" ${x.id === state.serviceId ? "selected" : ""}>${esc(x.name)} · ${priceText(x)}</option>`).join("")}</select>
+        ${s ? `<span class="hint">${esc(s.category)} · ${s.duration} phút${(s.includes || []).length ? " · " + esc(s.includes.slice(0, 2).join(", ")) : ""}</span>` : ""}<span class="err"></span></div>
+
+      <div class="field" data-field="photographer"><label for="f_photographer">Thám tử muốn chụp</label>
+        <div class="bk-pick"><span class="opt-avatar ph-${pickPh ? pickPh.tone : "stone"}" aria-hidden="true">${pickPh ? avatar(pickPh) : "?"}</span>
+        <select id="f_photographer" name="photographer"><option value="any" ${!pickPh ? "selected" : ""}>Chưa chọn, để team sắp xếp · không phụ phí</option>
+          ${PHOTOGRAPHERS.map(p => { const ok = el.includes(p); return `<option value="${p.id}" ${p === pickPh ? "selected" : ""} ${ok ? "" : "disabled"}>${esc(p.name)}${ok ? (p.surcharge ? " · +" + money(p.surcharge) : "") : " · không nhận gói này"}</option>`; }).join("")}</select></div>
+        ${pickPh ? `<button type="button" class="link-btn bk-link" data-profile="${pickPh.id}">Xem hồ sơ ${esc(pickPh.name)}</button>` : ""}</div>
+
+      ${STAFF.length ? `<div class="field" data-field="staff"><label for="f_staff">Staff take care buổi chụp</label>
+        <select id="f_staff" name="staff"><option value="any" ${state.staffId === "any" ? "selected" : ""}>Để team sắp xếp · không phụ phí</option>
+          ${STAFF.map(x => `<option value="${x.id}" ${x.id === state.staffId ? "selected" : ""}>${esc(x.name)}${x.role ? " · " + esc(x.role) : ""} · ${x.price ? "+" + money(x.price) : "miễn phí"}</option>`).join("")}</select>
+        <span class="hint">Hỗ trợ tạo dáng, chỉnh trang phục, đạo cụ trong buổi chụp.</span></div>` : ""}
+
+      <div class="field" data-field="time"><span class="label">Chụp cả ngày hay nửa ngày</span><div id="shiftBox"></div><span class="err"></span></div>
+
+      <div class="people-box">
+        <p class="people-title" id="peopleTitle"></p>
+        <input type="range" name="people" min="1" max="${MAX_PEOPLE}" step="1" value="${state.people}" aria-label="Số người chụp" />
+        <div class="people-ticks" aria-hidden="true">${Array.from({ length: MAX_PEOPLE }, (_, i) => `<span>${i + 1}</span>`).join("")}</div>
+        <p class="hint">Mặc định 1 người. Kéo sang phải nếu chụp nhóm, tối đa ${MAX_PEOPLE} người.${s && s.pricePerPerson > 0 ? ` Thêm ${money(s.pricePerPerson)} mỗi người từ người thứ 2.` : ""}</p>
+      </div>
+
+      ${f("name", "Tên bạn", "text", c.name, "Nguyễn Văn A", 'autocomplete="name"')}
+      ${f("phone", "Số điện thoại", "tel", c.phone, "0901 234 567", 'autocomplete="tel" inputmode="tel"', "Team gọi / nhắn Zalo số này để xác nhận.")}
+      ${f("email", "Email", "email", c.email, "ban@example.com", 'autocomplete="email"', "Không bắt buộc")}
+
+      <div class="field" data-field="date"><span class="label">Ngày chụp</span><div id="calendar"></div><p class="hint" id="dateNote"></p><span class="err"></span></div>
+
+      <div class="field" data-field="zone"><label for="f_zone">Tỉnh / thành chụp</label>
+        <select id="f_zone" name="zone">${ZONES.map(zz => `<option value="${zz.id}" ${zz.id === state.zoneId ? "selected" : ""}>${esc(zz.name)} · ${zz.fee ? (zz.quote ? "báo giá riêng" : "+" + feeRange(zz)) : "miễn phí đi lại"}</option>`).join("")}</select>
+        ${z.leadDays || z.quote ? `<span class="hint">${z.leadDays ? `Đặt trước ít nhất ${z.leadDays} ngày. ` : ""}${z.quote ? esc(z.note || "") + " Tạm tính chưa gồm vé di chuyển." : ""}</span>` : ""}</div>
+      ${f("address", "Địa điểm cụ thể (trường, quận/huyện)", "text", state.address, "VD: ĐH Thương Mại, Cầu Giấy", 'autocomplete="street-address"')}
+      ${z.perNight && !z.quote ? `<div class="field"><label for="f_nights">Ekip ở lại qua đêm</label>
+        <select id="f_nights" name="nights">${[0, 1, 2, 3].map(n => `<option value="${n}" ${n === state.nights ? "selected" : ""}>${n ? n + " đêm · +" + money(z.perNight * n) : "Không, đi về trong ngày"}</option>`).join("")}</select></div>` : ""}
+
+      <div id="eveningBox"></div>
+
+      ${ADDONS.length ? `<div class="field"><span class="label">Dịch vụ thêm <small>(không bắt buộc)</small></span><div class="bk-addons" id="addonBox"></div></div>` : ""}
+
+      <div class="field"><label for="f_note">Concept mong muốn</label><textarea id="f_note" name="note" placeholder="VD: tone pastel, chụp ở sân trường lúc chiều">${esc(c.note)}</textarea></div>
+
+      <label class="check" data-field="agree"><input type="checkbox" name="agree" ${c.agree ? "checked" : ""} />
+        <span>Tôi đồng ý đặt cọc ${S.depositPercent}% để giữ lịch${(S.payment && S.payment.enabled) || PHOTOGRAPHERS.some(x => x.hasOwnPayment) ? " (chuyển khoản qua mã QR sau khi gửi)" : ""}. Cọc được hoàn nếu báo dời/hủy trước 72 giờ.<span class="err" style="display:block"></span></span></label>
+    </div>`;
+    renderCalendar(); renderSlots(); renderAddons();
   }
 
-  const stepRender = {
-    1() {
-      return `<h3 class="step-title" tabindex="-1">Chọn gói chụp</h3><p class="step-sub">Gói quyết định thời lượng buổi chụp và các thám tử nhận vụ.</p>
-        <div class="options one-col">${SERVICES.map(s => option({ name: "service", value: s.id, checked: s.id === state.serviceId,
-          title: s.name, sub: [s.category, s.duration + " phút", (s.includes || [])[1]].filter(Boolean).join(" · "), side: money(s.price) })).join("")}</div>`;
-    },
-    2() {
-      const s = svcById(state.serviceId);
-      const el = eligible();
-      return `<h3 class="step-title" tabindex="-1">Chọn thám tử ảnh</h3><p class="step-sub">Các thám tử nhận gói “${s.name}”. Chọn đích danh có thể có phụ phí.</p>
-        <div class="options one-col">
-        ${option({ name: "photographer", value: "any", checked: state.photographerId === "any", title: "Để team sắp xếp", sub: "Team chọn thám tử phù hợp và còn trống lịch", side: "Không phụ phí" })}
-        ${PHOTOGRAPHERS.map(p => { const ok = el.includes(p);
-          return option({ name: "photographer", value: p.id, checked: p.id === state.photographerId, disabled: !ok,
-            lead: `<span class="opt-avatar ph-${p.tone}" aria-hidden="true">${p.avatar ? `<img src="${p.avatar}" alt="" />` : initials(p.name)}</span>`,
-            title: p.name, sub: ok ? `${p.role} · ★ ${p.rating} · ${p.specialties.slice(0, 2).join(", ")} · <button type="button" class="link-btn" data-profile="${p.id}">Hồ sơ</button>` : "Không nhận gói này",
-            side: ok ? (p.surcharge ? "+" + money(p.surcharge) : "Không phụ phí") : "" }); }).join("")}
-        </div>
-        ${STAFF.length ? `<p class="group-label">Staff take care buổi chụp</p>
-        <p class="step-sub" style="margin-top:-6px">Người chăm sóc bạn trong buổi chụp: hỗ trợ tạo dáng, chỉnh trang phục, đạo cụ.</p>
-        <div class="options one-col">
-        ${option({ name: "staff", value: "any", checked: state.staffId === "any", title: "Để team sắp xếp", sub: "Team chọn staff còn trống lịch", side: "Không phụ phí" })}
-        ${STAFF.map(x => option({ name: "staff", value: x.id, checked: x.id === state.staffId,
-            lead: `<span class="opt-avatar ph-${x.tone || "sage"}" aria-hidden="true">${x.avatar ? `<img src="${x.avatar}" alt="" />` : initials(x.name)}</span>`,
-            title: esc(x.name), sub: esc([x.role, x.bio].filter(Boolean).join(" · ")), side: x.price ? "+" + money(x.price) : "Miễn phí" })).join("")}
-        </div>` : ""}`;
-    },
-    3() {
-      const z = zoneById(state.zoneId);
-      const away = true; // team không có studio: luôn chụp tại địa điểm khách chọn
-      return `<h3 class="step-title" tabindex="-1">Địa điểm & thời gian</h3><p class="step-sub">Team đến chụp tại địa điểm bạn chọn. Phí di chuyển tính theo khu vực.</p>
-        <p class="group-label">Khu vực chụp</p>
-        <div class="options">${ZONES.map(zz => option({ name: "zone", value: zz.id, checked: zz.id === state.zoneId,
-          title: zz.name, sub: zz.examples + (zz.leadDays ? ` · đặt trước ≥ ${zz.leadDays} ngày` : ""),
-          side: zz.fee ? (zz.quote ? "Báo giá riêng" : "+" + feeRange(zz)) : "Miễn phí" })).join("")}</div>
-        ${away ? `<div class="fields" style="margin-top:16px">
-          <div class="field ${z.perNight && !z.quote ? "" : "full"}" data-field="address"><label for="fAddress">Địa chỉ / khu vực chụp *</label>
-            <input id="fAddress" name="address" value="${esc(state.address)}" placeholder="VD: Hồ Xuân Hương, Đà Lạt, Lâm Đồng" autocomplete="street-address" /><span class="err"></span></div>
-          ${z.perNight && !z.quote ? `<div class="field"><label for="fNights">Ekip ở lại qua đêm</label>
-            <select id="fNights" name="nights">${[0, 1, 2, 3].map(n => `<option value="${n}" ${n === state.nights ? "selected" : ""}>${n ? n + " đêm · +" + money(z.perNight * n) : "Không, đi về trong ngày"}</option>`).join("")}</select></div>` : ""}
-          </div>${z.quote ? `<p class="note">${z.note} Tổng tạm tính chưa gồm vé di chuyển.</p>` : ""}` : ""}
-        <p class="group-label">Ngày & giờ</p>
-        <div class="when"><div id="calendar"></div><div id="slots"></div></div>`;
-    },
-    4() {
-      return `<h3 class="step-title" tabindex="-1">Dịch vụ đi kèm</h3><p class="step-sub">Không bắt buộc. Giá cập nhật ngay ở phần tóm tắt.</p>
-        <div class="grid" style="gap:10px">${ADDONS.map(a => itemHTML("addon", a, true)).join("") || `<div class="empty">Hiện chưa có dịch vụ đi kèm — bấm Tiếp tục.</div>`}</div>`;
-    },
-    5() {
-      const c = state.customer;
-      const f = (id, label, type, val, ph, extra = "", full = false) => `<div class="field${full ? " full" : ""}" data-field="${id}"><label for="f_${id}">${label}</label>
-        <input id="f_${id}" name="${id}" type="${type}" value="${esc(val)}" placeholder="${ph}" ${extra} /><span class="err"></span></div>`;
-      return `<h3 class="step-title" tabindex="-1">Thông tin người đặt</h3><p class="step-sub">Team dùng thông tin này để gọi xác nhận và gửi hướng dẫn đặt cọc.</p>
-        <div class="fields">
-          ${f("name", "Họ và tên *", "text", c.name, "Nguyễn Văn A", 'autocomplete="name"')}
-          ${f("phone", "Số điện thoại *", "tel", c.phone, "0901 234 567", 'autocomplete="tel" inputmode="tel"')}
-          ${f("email", "Email", "email", c.email, "ban@example.com", 'autocomplete="email"', true)}
-          <div class="field full"><label for="f_note">Ghi chú cho thám tử</label><textarea id="f_note" name="note" placeholder="Ý tưởng, moodboard, số người, trang phục…">${esc(c.note)}</textarea></div>
-          <label class="check field full" data-field="agree"><input type="checkbox" name="agree" ${c.agree ? "checked" : ""} />
-            <span>Tôi đồng ý đặt cọc ${S.depositPercent}% để giữ lịch${(S.payment && S.payment.enabled) || PHOTOGRAPHERS.some(x => x.hasOwnPayment) ? " (chuyển khoản qua mã QR ở bước cuối)" : ""}. Cọc được hoàn nếu báo dời/hủy trước 72 giờ.<span class="err" style="display:block"></span></span></label>
-        </div>`;
-    },
-  };
+  // Hiện form (sau khi chọn gói / thám tử / khu vực từ trang khác, hoặc đặt lịch mới)
+  function showForm({ scroll = false, focus = null } = {}) {
+    if (scroll) openPage("booking");
+    state.step = 1; errEl.textContent = "";
+    renderForm(); refreshSummary(); $("#stepNav").hidden = false;
+    btnNext.textContent = "Gửi hồ sơ đặt lịch"; btnNext.disabled = false;
+    if (M.stepIn) M.stepIn(view);
+    if (focus) { const x = $("#" + focus); if (x) x.focus({ preventScroll: true }); }
+  }
+  // Vẽ lại form giữ nguyên vị trí cuộn và ô đang chọn
+  function rerender(focusId) { const y = window.scrollY; renderForm(); window.scrollTo(0, y); if (focusId) { const x = $("#" + focusId); if (x) x.focus({ preventScroll: true }); } refreshSummary(); }
+
+  function fail(msg, fieldName) {
+    errEl.textContent = msg;
+    if (fieldName) { const f = view.querySelector(`[data-field="${fieldName}"]`); if (f) { f.classList.add("has-error"); const e = f.querySelector(".err"); if (e) e.textContent = msg;
+      f.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      const inp = f.querySelector("input,select"); if (inp) inp.focus({ preventScroll: true }); } }
+    if (M.shake) M.shake(errEl);
+    return false;
+  }
+
+  function validate() {
+    $$(".has-error", view).forEach(f => { f.classList.remove("has-error"); const e = f.querySelector(".err"); if (e) e.textContent = ""; });
+    errEl.textContent = "";
+    const c = state.customer;
+    if (!state.serviceId) return fail("Chọn gói chụp.", "service");
+    if (!state.photographerId) state.photographerId = "any";
+    if (c.name.trim().length < 2) return fail("Nhập tên của bạn.", "name");
+    if (!/^(0|\+84)\d{9}$/.test(c.phone.replace(/[\s.-]/g, ""))) return fail("Số điện thoại chưa đúng (10 số, bắt đầu bằng 0).", "phone");
+    if (c.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)) return fail("Email chưa đúng định dạng.", "email");
+    if (!state.date) return fail("Chọn ngày chụp trên lịch.", "date");
+    if (!state.time) return fail("Chọn chụp cả ngày hay nửa ngày (sáng / chiều).", "time");
+    if (!slotOpen(state.date, state.time)) { state.time = null; renderSlots(); refreshSummary(); return fail("Buổi này không còn trống hoặc không đủ thời gian cho gói + dịch vụ thêm. Chọn buổi khác.", "time"); }
+    if (state.address.trim().length < 5) return fail("Nhập địa điểm cụ thể.", "address");
+    if (!c.agree) return fail("Vui lòng đồng ý điều khoản đặt cọc.", "agree");
+    return true;
+  }
 
   /* Lịch + khung giờ (vẽ lại riêng để không giật cả bước) */
   function renderCalendar() {
@@ -415,30 +479,17 @@
       <div class="cal-grid">${cells}</div>
       <div class="cal-legend"><span><i style="background:var(--accent)"></i>Đã chọn</span><span><i style="border:1px solid var(--line);background:var(--surface)"></i>Còn trống</span><span><i style="background:var(--alt)"></i>Hết lịch / thám tử nghỉ</span></div>`;
   }
-  function renderSlots() {
-    const box = $("#slots"); if (!box) return;
-    if (!state.date) { box.innerHTML = `<div class="empty">Chọn một ngày trên lịch để xem buổi còn trống.</div>`; return; }
-    const mins = totalMinutes(), z = zoneById(state.zoneId), halfOk = SHIFT_LIST.some(s => s.id !== "full" && shiftFits(s.id, mins));
-    box.innerHTML = `<p style="font-weight:600">${dateLabel(state.date)}</p>
-      <p class="step-sub" style="margin:2px 0 14px">${svcById(state.serviceId).name} · ${mins} phút</p>
-      <div class="slots shifts">${SHIFT_LIST.map(s => { const ok = slotOpen(state.date, s.id, mins);
-        return `<button type="button" class="slot shift${s.id === state.time ? " is-selected" : ""}" data-time="${s.id}" ${ok ? "" : "disabled"} aria-pressed="${s.id === state.time}"><strong>${s.label}</strong><small>${s.start} – ${s.end}</small></button>`; }).join("")}</div>
-      <p class="note neutral">${z.fullDay
-        ? `Chụp đi tỉnh chỉ nhận lịch cả ngày${state.nights ? `, thám tử cần trống thêm ${state.nights} ngày sau (ở lại qua đêm)` : ""}.`
-        : !halfOk ? `Gói này cần khoảng ${Math.ceil(mins / 60)} tiếng nên chỉ nhận lịch cả ngày.`
-        : `Buổi mờ là đã có khách. Nghỉ trưa ${SH.morning.end} – ${SH.afternoon.start}.`}</p>`;
-  }
-
   function renderSummary(prevTotal) {
     const s = svcById(state.serviceId), z = zoneById(state.zoneId), q = quote();
     const p = state.photographerId === "any" ? null : phById(state.photographerId);
     const row = (k, v) => `<div class="sum-row"><span>${k}</span><span>${v}</span></div>`;
-    if (!s) { $("#summaryBody").innerHTML = `<p class="sum-empty">Chưa có gói chụp. Chọn gói ở bước 1 hoặc bấm “Chọn gói” phía trên.</p>`; return; }
+    if (!s) { $("#summaryBody").innerHTML = `<p class="sum-empty">Chưa có gói chụp. Chọn gói ở ô đầu tiên của form.</p>`; return; }
     let html = row("Gói chụp", s.name)
       + row("Thám tử", p ? p.name : state.photographerId === "any" ? "Team sắp xếp" : "—")
       + (STAFF.length ? row("Staff take care", state.staffId !== "any" && stById(state.staffId) ? esc(stById(state.staffId).name) : "Team sắp xếp") : "")
       + row("Địa điểm", z.short + (state.address ? " · " + esc(state.address) : ""))
-      + row("Lịch", state.date ? `${dateLabel(state.date).replace(/, (\d+)\/(\d+)\/\d+/, " $1/$2")}${state.time ? " · " + (shiftById(state.time) || {}).label : ""}` : "—");
+      + row("Lịch", state.date ? `${dateLabel(state.date).replace(/, (\d+)\/(\d+)\/\d+/, " $1/$2")}${state.time ? " · " + (shiftById(state.time) || {}).label : ""}${state.evening ? " + tối" : ""}` : "—")
+      + row("Số người", `${state.people || 1} người`);
     html += `<hr class="sum-sep" />` + q.rows.map(([k, v]) => row(k, money(v))).join("");
     html += `<hr class="sum-sep" /><div class="sum-total"><span>Tạm tính${q.needsQuote ? "*" : ""}</span><strong id="sumTotal">${money(q.total)}</strong></div>`
       + `<div class="sum-row sum-deposit"><span>Đặt cọc ${S.depositPercent}%</span><span>${money(q.deposit)}</span></div>`
@@ -450,71 +501,6 @@
   let lastTotal = null;
   function refreshSummary() { const t = quote().total; renderSummary(lastTotal); lastTotal = t; save(); }
 
-  function renderStep() {
-    renderStepper();
-    errEl.textContent = "";
-    if (state.step === "done") return;
-    view.innerHTML = stepRender[state.step]();
-    if (state.step === 3) { renderCalendar(); renderSlots(); }
-    btnBack.style.visibility = state.step === 1 ? "hidden" : "visible";
-    btnNext.textContent = state.step === 5 ? "Gửi hồ sơ đặt lịch" : "Tiếp tục →";
-    $("#stepNav").hidden = false;
-  }
-
-  // Không cho vào bước khi thiếu dữ liệu của bước trước
-  function clampStep(n) {
-    if (n === "done") return n;
-    if (n > 1 && !state.serviceId) return 1;
-    if (n > 2 && !state.photographerId) return 2;
-    return n;
-  }
-
-  async function goTo(n, { scroll = false, focus = true } = {}) {
-    n = clampStep(n);
-    if (scroll) openPage("booking");
-    if (M.stepOut) await M.stepOut(view);
-    state.step = n; if (typeof n === "number") state.maxStep = Math.max(state.maxStep, n);
-    if (n === 3) await loadBusy(); // lịch luôn mới khi vào bước chọn giờ
-    renderStep(); refreshSummary();
-    if (M.stepIn) M.stepIn(view);
-    if (focus && !scroll) { const h = $(".step-title", view); if (h) h.focus({ preventScroll: true }); }
-  }
-
-  function fail(msg, fieldName) {
-    errEl.textContent = msg;
-    if (fieldName) { const f = view.querySelector(`[data-field="${fieldName}"]`); if (f) { f.classList.add("has-error"); const e = f.querySelector(".err"); if (e) e.textContent = msg; const inp = f.querySelector("input,select"); if (inp) inp.focus(); } }
-    if (M.shake) M.shake(errEl);
-    return false;
-  }
-
-  function validate() {
-    $$(".has-error", view).forEach(f => { f.classList.remove("has-error"); const e = f.querySelector(".err"); if (e) e.textContent = ""; });
-    switch (state.step) {
-      case 1: return state.serviceId ? true : fail("Chọn một gói chụp để tiếp tục.");
-      case 2: return state.photographerId ? true : fail("Chọn thám tử hoặc “Để team sắp xếp”.");
-      case 3: {
-        if (state.address.trim().length < 5) return fail("Nhập địa chỉ hoặc khu vực chụp.", "address");
-        if (!state.date) return fail("Chọn ngày chụp.");
-        if (!state.time) return fail("Chọn buổi chụp: cả ngày, sáng hoặc chiều.");
-        if (!slotOpen(state.date, state.time)) { state.time = null; renderSlots(); return fail("Buổi vừa chọn không còn trống, chọn buổi khác."); }
-        return true;
-      }
-      case 4: {
-        if (state.date && state.time && !slotOpen(state.date, state.time)) return fail(`Với dịch vụ thêm, buổi chụp cần khoảng ${Math.ceil(totalMinutes() / 60)} tiếng, dài hơn ${(shiftById(state.time) || {}).label?.toLowerCase()}. Bớt “Thêm giờ” hoặc quay lại bước 3 chọn “Cả ngày”.`);
-        return true;
-      }
-      case 5: {
-        const c = state.customer;
-        if (c.name.trim().length < 2) return fail("Nhập họ tên.", "name");
-        if (!/^(0|\+84)\d{9}$/.test(c.phone.replace(/[\s.-]/g, ""))) return fail("Số điện thoại chưa đúng (10 số, bắt đầu bằng 0).", "phone");
-        if (c.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)) return fail("Email chưa đúng định dạng.", "email");
-        if (!c.agree) return fail("Vui lòng đồng ý điều khoản đặt cọc.", "agree");
-        return true;
-      }
-    }
-    return true;
-  }
-
   function bookingCode() {
     const d = fromKey(state.date), chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
     let r = ""; for (let i = 0; i < 4; i++) r += chars[Math.floor(Math.random() * chars.length)];
@@ -523,7 +509,7 @@
 
   function gcalLink(code) {
     const s = svcById(state.serviceId), z = zoneById(state.zoneId);
-    const sh = shiftById(state.time), start = toMin(sh.start), end = toMin(sh.end);
+    const sh = shiftById(state.time), start = toMin(sh.start), end = state.evening ? toMin(EV.end) : toMin(sh.end);
     const ymd = state.date.replace(/-/g, "");
     const fmt = m => `${ymd}T${pad(Math.floor(m / 60))}${pad(m % 60)}00`;
     const params = new URLSearchParams({ action: "TEMPLATE", text: `Chụp ảnh ${S.name} · ${s.name}`, dates: `${fmt(start)}/${fmt(end)}`, ctz: "Asia/Ho_Chi_Minh",
@@ -535,7 +521,7 @@
     btnNext.disabled = true; btnNext.textContent = "Đang gửi…";
     const q = quote(), ph = assignedPhotographer();
     const payload = { serviceId: state.serviceId, photographerId: state.photographerId, staffId: state.staffId || "any", zoneId: state.zoneId, address: state.address, nights: state.nights,
-      date: state.date, time: state.time, addons: state.addons, products: {}, customer: state.customer };
+      date: state.date, time: state.time, people: state.people || 1, evening: !!state.evening, addons: state.addons, products: {}, customer: state.customer };
     let code, photographerName = null, staffName = null, transferNote = null, payTo = null, viewToken = null;
     if (HAS_API) {
       try {
@@ -543,8 +529,8 @@
         const res = await r.json().catch(() => ({}));
         if (r.status === 409) {
           // Giờ vừa bị người khác đặt: tải lại lịch bận, quay về bước 3
-          btnNext.disabled = false; await loadBusy(); state.time = null;
-          await goTo(3); fail(res.error || "Buổi này vừa có người đặt, chọn buổi khác."); return;
+          btnNext.disabled = false; btnNext.textContent = "Gửi hồ sơ đặt lịch"; await loadBusy(); state.time = null;
+          renderCalendar(); renderSlots(); refreshSummary(); fail(res.error || "Buổi này vừa có người đặt, chọn buổi khác.", "time"); return;
         }
         if (!r.ok) { btnNext.disabled = false; btnNext.textContent = "Gửi hồ sơ đặt lịch"; return fail(res.error || "Không gửi được, thử lại sau."); }
         code = res.code; q.total = res.total; q.deposit = res.deposit; photographerName = res.photographerName; staffName = res.staffName || null; transferNote = res.transferNote; payTo = res.payTo || null; viewToken = res.viewToken || null; // chốt theo server
@@ -596,7 +582,7 @@
       <div class="sum-box">
         ${row("Gói chụp", s.name)}${row("Thám tử", b.photographerName || (ph ? ph.name : "Team sắp xếp"))}${b.staffName ? row("Staff take care", esc(b.staffName)) : ""}
         ${row("Địa điểm", `${z.short} · ${esc(b.address)}`)}
-        ${row("Lịch chụp", `${dateLabel(b.date)} · ${shiftText(b.time)}`)}
+        ${row("Lịch chụp", `${dateLabel(b.date)} · ${shiftText(b.time)}${b.evening ? ` + tối đến ${EV.end}` : ""} · ${b.people} người`)}
         ${row("Người đặt", `${esc(b.customer.name)} · ${esc(b.customer.phone)}`)}
         ${row("Tổng tạm tính", money(q.total) + (q.needsQuote ? "*" : ""), true)}${row("Cần đặt cọc", `<span style="color:var(--accent)">${money(q.deposit)}</span>`, true)}
       </div>
@@ -609,7 +595,7 @@
         <a class="btn btn-primary" href="${gcalLink(b.code)}" target="_blank" rel="noopener">Thêm vào Google Calendar</a>
         <button type="button" class="btn btn-ghost" id="btnNew">Đặt lịch mới</button>
       </div></div>`;
-    state.step = "done"; renderStepper(); $("#stepNav").hidden = true;
+    state.step = "done"; $("#stepNav").hidden = true;
     try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* bỏ qua */ }
     if (M.successIn) M.successIn(view); else if (M.stepIn) M.stepIn(view);
     $(".success h3").focus({ preventScroll: true });
@@ -690,7 +676,7 @@
     const it = (kind === "addon" ? ADDONS : PRODUCTS).find(x => x.id === id);
     const next = Math.max(0, Math.min(it.max || 10, (bag[id] || 0) + delta));
     if (next) bag[id] = next; else delete bag[id];
-    renderExtras(); if (state.step === 4) { const y = window.scrollY; view.innerHTML = stepRender[4](); window.scrollTo(0, y); }
+    renderExtras(); renderAddons(); if (state.date && state.time && !slotOpen(state.date, state.time)) { renderSlots(); toast("Thêm giờ làm buổi chụp dài hơn buổi đã chọn, chọn “Cả ngày” nhé."); }
     refreshSummary();
     return next;
   }
@@ -789,7 +775,7 @@
     if (t.matches("[data-cat]")) { activeCat = t.dataset.cat; renderServices(); return; }
     if (t.matches("[data-pick-service]")) {
       setService(t.dataset.pickService);
-      goTo(state.photographerId ? 3 : 2, { scroll: true });
+      showForm({ scroll: true });
       toast(`Đã chọn “${svcById(state.serviceId).name}”`);
       return;
     }
@@ -805,7 +791,7 @@
       const p = phById(t.dataset.bookWith); state.photographerId = p.id;
       if (state.serviceId && !p.services.includes(state.serviceId)) state.serviceId = null;
       if (state.time && state.date && state.serviceId && !slotOpen(state.date, state.time)) state.time = null;
-      closeModal(); goTo(state.serviceId ? 3 : 1, { scroll: true });
+      closeModal(); showForm({ scroll: true });
       toast(`Đã chọn thám tử ${p.name}${state.serviceId ? "" : " — chọn gói chụp nhé"}`);
       return;
     }
@@ -818,21 +804,23 @@
     if (t.matches("[data-pick-zone]")) {
       const z = zoneById(t.dataset.pickZone); state.zoneId = z.id; if (!z.perNight || z.quote) state.nights = 0;
       if (state.date && fromKey(state.date) < earliestDay()) { state.date = null; state.time = null; }
-      if (!state.serviceId) { goTo(1, { scroll: true }); toast(`Đã chọn ${z.name}. Chọn gói chụp trước nhé.`); }
-      else { state.maxStep = Math.max(state.maxStep, 3); goTo(3, { scroll: true }); toast(`Đã chọn ${z.name}`); }
+      showForm({ scroll: true }); toast(`Đã chọn ${z.name}${state.serviceId ? "" : ". Chọn gói chụp nhé"}`);
       return;
     }
-    if (t.matches("[data-goto]")) { goTo(Number(t.dataset.goto)); return; }
     if (t.matches("[data-month]")) {
       const [y, m] = state.calMonth.split("-").map(Number); const d = new Date(y, m - 1 + Number(t.dataset.month), 1);
       state.calMonth = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; renderCalendar(); return;
     }
     if (t.matches("[data-date]")) { state.date = t.dataset.date; if (state.time && !slotOpen(state.date, state.time)) state.time = null; renderCalendar(); renderSlots(); refreshSummary(); return; }
     if (t.matches("[data-time]")) { state.time = t.dataset.time; renderSlots(); refreshSummary(); errEl.textContent = ""; return; }
-    if (t.id === "btnNext") { if (!validate()) return; if (state.step === 5) submit(); else goTo(state.step + 1); return; }
-    if (t.id === "btnBack") { if (typeof state.step === "number" && state.step > 1) goTo(state.step - 1); return; }
+    if (t.matches("[data-mode]")) { // Nửa ngày: chọn sẵn buổi còn trống (ưu tiên sáng)
+      const ok = id => (!state.date || slotOpen(state.date, id)) && shiftFits(id);
+      if (!isHalf()) state.time = ok("morning") ? "morning" : ok("afternoon") ? "afternoon" : null;
+      renderSlots(); refreshSummary(); errEl.textContent = ""; return;
+    }
+    if (t.id === "btnNext") { if (validate()) submit(); return; }
     if (t.id === "btnCheckPaid") { const sm = t.parentElement.querySelector("small"); if (sm) sm.textContent = "Đang kiểm tra…"; if (watchDeposit.checkNow) watchDeposit.checkNow(); return; }
-    if (t.id === "btnNew") { stopWatch(); state = blank(); lastTotal = null; renderExtras(); goTo(1); return; }
+    if (t.id === "btnNew") { stopWatch(); state = blank(); lastTotal = null; renderExtras(); showForm(); return; }
     if (t.id === "navToggle") { const open = t.getAttribute("aria-expanded") !== "true"; t.setAttribute("aria-expanded", open); $("#nav").classList.toggle("is-open", open); return; }
     if (t.closest("#nav") && t.tagName === "A") { $("#nav").classList.remove("is-open"); $("#navToggle").setAttribute("aria-expanded", "false"); }
     // Bấm logo: cuộn lên đầu trang chủ, bỏ #… trên địa chỉ, đóng menu mobile
@@ -855,12 +843,13 @@
   });
   view.addEventListener("change", e => {
     const el = e.target;
-    if (el.name === "service") { setService(el.value); refreshSummary(); errEl.textContent = ""; }
-    else if (el.name === "staff") { state.staffId = el.value; if (state.time && state.date && !slotOpen(state.date, state.time)) { state.time = null; toast("Staff này đã có lịch vào buổi đã chọn, chọn lại buổi nhé."); } refreshSummary(); errEl.textContent = ""; }
-    else if (el.name === "photographer") { state.photographerId = el.value; if (state.time && state.date && !slotOpen(state.date, state.time)) state.time = null; refreshSummary(); errEl.textContent = ""; }
+    if (el.name === "service") { setService(el.value); if (!shiftFits("morning") && isHalf()) state.time = "full"; rerender("f_service"); errEl.textContent = ""; }
+    else if (el.name === "staff") { state.staffId = el.value; if (state.time && state.date && !slotOpen(state.date, state.time)) { state.time = null; toast("Staff này đã có lịch vào buổi đã chọn, chọn lại buổi nhé."); } renderCalendar(); renderSlots(); refreshSummary(); errEl.textContent = ""; }
+    else if (el.name === "photographer") { state.photographerId = el.value; if (state.date && !dayOpen(fromKey(state.date))) { state.date = null; toast("Thám tử này không trống ngày đã chọn, chọn lại ngày nhé."); } if (state.time && state.date && !slotOpen(state.date, state.time)) state.time = null; rerender("f_photographer"); errEl.textContent = ""; }
+    else if (el.name === "evening") { state.evening = el.checked && eveningOk(); refreshSummary(); }
     else if (el.name === "zone") { const z = zoneById(el.value); state.zoneId = z.id; if (!z.perNight || z.quote) state.nights = 0;
       if (state.date && fromKey(state.date) < earliestDay()) { state.date = null; state.time = null; toast(`${z.short} cần đặt trước ít nhất ${z.leadDays} ngày — chọn lại ngày nhé.`); }
-      const y = window.scrollY; renderStep(); window.scrollTo(0, y); refreshSummary(); }
+      if (z.fullDay) state.time = "full"; rerender("f_zone"); }
     else if (el.name === "nights") {
       state.nights = Number(el.value);
       // Đi tỉnh ở lại nhiều đêm cần thám tử trống thêm các ngày sau
@@ -872,6 +861,7 @@
   view.addEventListener("input", e => {
     const el = e.target;
     if (el.name === "address") { state.address = el.value; refreshSummary(); }
+    else if (el.name === "people") { state.people = Number(el.value) || 1; renderPeopleTitle(); refreshSummary(); }
     else if (["name", "phone", "email", "note"].includes(el.name)) { state.customer[el.name] = el.value; save(); }
   });
   view.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); btnNext.click(); } });
@@ -891,9 +881,7 @@
 
   /* ---------------- Khởi động ---------------- */
   renderStatic(); renderServices(); renderTeam(); renderExtras(); renderTravel();
-  state.step = clampStep(typeof state.step === "number" ? state.step : 1);
-  state.maxStep = Math.max(state.step, Math.min(state.maxStep || 1, clampStep(5)));
-  renderStep(); refreshSummary();
+  showForm();
 
   /* ---------------- Mỗi mục menu là một trang riêng ----------------
      Trang chủ = ảnh bìa + dải kêu gọi; các trang khác chỉ hiện đúng phần đó.
