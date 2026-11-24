@@ -557,12 +557,6 @@ main { min-height: 70vh; }
 .seg-sub .seg-btn { min-height: 48px; font-size: 15px; }
 .seg-sub .seg-btn.is-on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .seg-btn:disabled { opacity: .45; cursor: not-allowed; }
-/* Số người */
-.people-box { border: 1.5px solid var(--ink); border-radius: 18px; padding: 20px 22px 16px; background: var(--surface); }
-.people-title { font: 700 20px/1.2 var(--font-serif); margin: 0 0 14px; }
-.people-box input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); height: 28px; cursor: pointer; }
-.people-ticks { display: flex; justify-content: space-between; padding: 4px 6px 0; font: 500 14px var(--font-mono); color: var(--muted); }
-.people-box .hint { display: block; margin: 12px 0 0; font-size: 13px; color: var(--muted); }
 /* Buổi tối, dịch vụ thêm */
 .ev-check { font-size: 15px; align-items: center; }
 .ev-check input { width: 22px; height: 22px; margin: 0; flex: none; }

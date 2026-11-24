@@ -172,7 +172,7 @@ function validateSite(d) {
     area: clean(s.area || "", 200), openHours: clean(s.openHours || "", 120), facebook: url(s.facebook, "Facebook"), instagram: url(s.instagram, "Instagram"),
     depositPercent: int(s.depositPercent, "% đặt cọc", 0, 100), payment: validatePayment(s.payment) };
   const services = arr(d.services, "Gói chụp").map(x => ({ id: idOf(x.id, "gói"), name: req(x.name, "tên gói", 80), category: req(x.category, "danh mục", 40),
-    duration: int(x.duration, "Thời lượng (phút)", 15, 720), price: int(x.price, "Giá gói"), priceFull: x.priceFull ? int(x.priceFull, "Giá cả ngày") : 0, pricePerPerson: x.pricePerPerson ? int(x.pricePerPerson, "Giá thêm mỗi người") : 0, tone: tone(x.tone), desc: clean(x.desc || "", 300), includes: strList(x.includes || [], "Bao gồm", 8) }));
+    duration: int(x.duration, "Thời lượng (phút)", 15, 720), price: int(x.price, "Giá gói"), priceFull: x.priceFull ? int(x.priceFull, "Giá cả ngày") : 0, tone: tone(x.tone), desc: clean(x.desc || "", 300), includes: strList(x.includes || [], "Bao gồm", 8) }));
   uniqueIds(services, "gói"); if (!services.length) throw new Invalid("Cần ít nhất 1 gói chụp");
   const svcIds = new Set(services.map(x => x.id));
   const photographers = arr(d.photographers, "Thám tử").map(x => ({ id: idOf(x.id, "thám tử"), name: req(x.name, "tên thám tử", 60), role: clean(x.role || "", 60),
@@ -214,7 +214,6 @@ const DEFAULT_SHIFTS = { morning: { start: "08:00", end: "12:00" }, afternoon: {
 const SHIFT_IDS = ["morning", "afternoon", "full"];
 // Chụp thêm buổi tối (nối tiếp buổi chiều / cả ngày). Giá 0 = không nhận. Chưa cài: mặc định đến 20:00, 500.000đ
 const eveningOf = site => Object.assign({ end: "20:00", price: 500000 }, site && site.evening);
-const MAX_PEOPLE = 9;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const toMin = t => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
 function validateShifts(s) {
@@ -279,9 +278,6 @@ function priceBooking(site, b) {
   const stPick = b.staffId && b.staffId !== "any" ? (site.staff || []).find(x => x.id === b.staffId) : null;
   if (b.staffId && b.staffId !== "any" && !stPick) throw new Invalid("Staff không tồn tại");
   if (stPick && stPick.price) { total += stPick.price; lines.push(["Staff take care · " + stPick.name, stPick.price]); }
-  // Số người chụp (1–9): gói có "giá thêm mỗi người" thì cộng từ người thứ 2
-  const people = int(b.people || 1, "Số người chụp", 1, MAX_PEOPLE);
-  if (people > 1 && s.pricePerPerson > 0) { const v = s.pricePerPerson * (people - 1); total += v; lines.push([`Thêm ${people - 1} người`, v]); }
   // Chụp thêm buổi tối: chỉ khi chụp cả ngày hoặc buổi chiều
   const ev = eveningOf(site), evening = !!b.evening;
   if (evening) {
@@ -297,7 +293,7 @@ function priceBooking(site, b) {
   const addons = pick(b.addons, site.addons, "Dịch vụ"), products = pick(b.products, site.products, "Sản phẩm");
   if (b.time !== "full") { const [st, en] = shiftRange(site.shifts, b.time); if (minutes > en - st) throw new Invalid(`Buổi chụp cần ${Math.ceil(minutes / 60)} tiếng, dài hơn nửa buổi. Chọn “Cả ngày”.`); }
   const deposit = Math.round(total * site.studio.depositPercent / 100 / 1000) * 1000;
-  return { service: s, zone: z, photographer: p, people, evening, eveningEnd: evening ? ev.end : "", nights, addons, products, lines, total, deposit, minutes, needsQuote: !!z.quote };
+  return { service: s, zone: z, photographer: p, evening, eveningEnd: evening ? ev.end : "", nights, addons, products, lines, total, deposit, minutes, needsQuote: !!z.quote };
 }
 
 /* ---------------- Lịch bận theo đơn thật ----------------
@@ -376,7 +372,7 @@ function notifyBooking(bk) {
     `📸 ĐƠN ĐẶT LỊCH MỚI · ${bk.code}`,
     `Khách: ${bk.customer.name} · ${bk.customer.phone}`,
     `Gói: ${bk.serviceName}`,
-    `Ngày: ${dmy(bk.date)} · ${shiftVN(bk)} · ${bk.people || 1} người`,
+    `Ngày: ${dmy(bk.date)} · ${shiftVN(bk)}`,
     `Thám tử: ${bk.photographerName}${bk.staffName ? ` · Staff: ${bk.staffName}` : ""}`,
     `Nơi chụp: ${bk.zoneName} · ${bk.address}`,
     `Tổng: ${vnd(bk.total)} · Cọc: ${vnd(bk.deposit)}`,
@@ -391,7 +387,7 @@ const WEEKDAY_VN = ["Chủ nhật", "Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", 
 const vnKey = (offsetDays = 0) => { const d = new Date(Date.now() + 7 * 3600000 + offsetDays * 86400000); return d.toISOString().slice(0, 10); };
 const dayTitle = k => { const d = new Date(k + "T00:00:00Z"); return `📅 ${WEEKDAY_VN[d.getUTCDay()]}, ${dmy(k)}`; };
 const SHIFT_ORDER = { morning: 0, full: 1, afternoon: 2 };
-const bookingLine = b => `• ${shiftVN(b)} · ${b.people || 1} người · ${b.customer.name} ${b.customer.phone}\n   ${b.serviceName} · ${b.photographerName}${b.staffName ? " + " + b.staffName : ""}\n   📍 ${b.zoneName} · ${b.address}\n   ${b.code} · ${STATUS_VN[b.status] || b.status} · Tổng ${vnd(b.total)}${b.status === "deposited" || b.status === "done" ? "" : " · Cọc " + vnd(b.deposit)}`;
+const bookingLine = b => `• ${shiftVN(b)} · ${b.customer.name} ${b.customer.phone}\n   ${b.serviceName} · ${b.photographerName}${b.staffName ? " + " + b.staffName : ""}\n   📍 ${b.zoneName} · ${b.address}\n   ${b.code} · ${STATUS_VN[b.status] || b.status} · Tổng ${vnd(b.total)}${b.status === "deposited" || b.status === "done" ? "" : " · Cọc " + vnd(b.deposit)}`;
 function listByDay(list, empty) {
   if (!list.length) return empty;
   const by = {}; for (const b of list) (by[b.date] ||= []).push(b);
@@ -424,7 +420,7 @@ async function botReply(text, allowed, chatId) {
       if (!b) return `Không tìm thấy đơn ${words[1]}.`;
       const paid = (b.payments || []).reduce((s, p) => s + p.amount, 0);
       return [`📄 ${b.code} · ${STATUS_VN[b.status] || b.status}`, `Khách: ${b.customer.name} · ${b.customer.phone}${b.customer.email ? " · " + b.customer.email : ""}`,
-        `Ngày: ${dayTitle(b.date).slice(3)} · ${shiftVN(b)} · ${b.people || 1} người`, `Gói: ${b.serviceName}`, `Thám tử: ${b.photographerName}${b.staffName ? " · Staff: " + b.staffName : ""}`,
+        `Ngày: ${dayTitle(b.date).slice(3)} · ${shiftVN(b)}`, `Gói: ${b.serviceName}`, `Thám tử: ${b.photographerName}${b.staffName ? " · Staff: " + b.staffName : ""}`,
         `Nơi chụp: ${b.zoneName} · ${b.address}`, ...(b.lines || []).map(([k, v]) => `  ${k}: ${vnd(v)}`), `Tổng: ${vnd(b.total)} · Cọc: ${vnd(b.deposit)}${paid ? ` · Đã nhận: ${vnd(paid)}` : ""}`,
         b.customer.note ? `Ghi chú khách: ${b.customer.note}` : "", b.adminNote ? `Ghi chú nội bộ: ${b.adminNote}` : ""].filter(Boolean).join("\n");
     }
@@ -621,7 +617,7 @@ async function createBooking(b, res) {
     const booking = { code, status: "new", createdAt: new Date().toISOString(), serviceId: q.service.id, serviceName: q.service.name,
       requestedPhotographer: q.photographer ? q.photographer.id : "any", photographerId: ph.id, photographerName: ph.name + (q.photographer ? "" : " (team xếp)"),
       staffId: st ? st.id : "", staffName: st ? st.name + (staffPicked ? "" : " (team xếp)") : (staffList.length ? "Team sắp xếp" : ""),
-      zoneId: q.zone.id, zoneName: q.zone.name, fullDay, address, nights: q.nights, date: b.date, time: b.time, people: q.people, evening: q.evening, eveningEnd: q.eveningEnd, minutes: q.minutes,
+      zoneId: q.zone.id, zoneName: q.zone.name, fullDay, address, nights: q.nights, date: b.date, time: b.time, evening: q.evening, eveningEnd: q.eveningEnd, minutes: q.minutes,
       addons: q.addons, products: q.products, lines: q.lines, total: q.total, deposit: q.deposit, needsQuote: q.needsQuote, customer, adminNote: "",
       transferNote: transferNote(code), payTo: payToFor(site, ph), viewToken: crypto.randomBytes(16).toString("hex"), payments: [] };
     all.push(booking); await writeJSON(FILES.bookings, all);

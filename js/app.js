@@ -59,7 +59,7 @@
   const DRAFT_KEY = "mg_draft_v1";
   const blank = () => ({
     step: 1, serviceId: null, photographerId: "any", staffId: "any", zoneId: ZONES[0].id, nights: 0, address: "",
-    date: null, time: "full", people: 1, evening: false, calMonth: null, addons: {}, products: {},
+    date: null, time: "full", evening: false, calMonth: null, addons: {}, products: {},
     customer: { name: "", phone: "", email: "", note: "", agree: false },
   });
   let state = blank();
@@ -70,7 +70,7 @@
   state.products = {}; // mục Sản phẩm đã bỏ — xóa lựa chọn cũ trong bản nháp
   for (const id of Object.keys(state.addons)) if (!ADDONS.some(a => a.id === id)) delete state.addons[id];
   if (!state.photographerId || (state.photographerId !== "any" && !phById(state.photographerId))) state.photographerId = "any";
-  state.people = Math.min(9, Math.max(1, Number(state.people) || 1));
+  delete state.people;
   if (state.serviceId && !svcById(state.serviceId)) state.serviceId = null;
   if (!state.staffId || (state.staffId !== "any" && !stById(state.staffId))) state.staffId = "any";
   const save = () => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(state)); } catch (e) { /* bỏ qua */ } };
@@ -152,8 +152,6 @@
     if (p && p.surcharge) { rows.push(["Phụ phí chọn thám tử", p.surcharge]); total += p.surcharge; }
     const stp = state.staffId && state.staffId !== "any" ? stById(state.staffId) : null;
     if (stp && stp.price) { rows.push([`Staff take care · ${stp.name}`, stp.price]); total += stp.price; }
-    const n = state.people || 1;
-    if (s && n > 1 && s.pricePerPerson > 0) { const v = s.pricePerPerson * (n - 1); rows.push([`Thêm ${n - 1} người`, v]); total += v; }
     if (state.evening && EV.price > 0) { rows.push([`Chụp thêm buổi tối đến ${EV.end}`, EV.price]); total += EV.price; }
     if (z.fee) { rows.push([`Phí di chuyển · ${z.short}${z.feeMax > z.fee ? " (mức thấp)" : ""}`, z.fee]); total += z.fee; }
     if (z.perNight && state.nights) { const v = z.perNight * state.nights; rows.push([`Lưu trú ekip × ${state.nights} đêm`, v]); total += v; }
@@ -325,7 +323,6 @@
   const view = $("#stepView"), errEl = $("#stepError"), btnNext = $("#btnNext");
   // Chụp thêm buổi tối (admin cài giá; 0 = không nhận) và số người tối đa
   const EV = Object.assign({ end: "20:00", price: 500000 }, window.EVENING);
-  const MAX_PEOPLE = 9;
   const halfAllowed = () => SHIFT_LIST.some(s => s.id !== "full" && shiftFits(s.id));
   const isHalf = () => state.time === "morning" || state.time === "afternoon";
   const eveningOk = () => EV.price > 0 && state.time !== "morning";
@@ -346,8 +343,6 @@
         : !canHalf ? `Gói này cần khoảng ${Math.ceil(mins / 60)} tiếng nên chỉ nhận lịch cả ngày.`
         : state.date ? "Nút mờ là buổi đó đã kín lịch trong ngày bạn chọn." : `Cả ngày ${full.start} – ${full.end}, nghỉ trưa ${SH.morning.end} – ${SH.afternoon.start}.`}</p>`;
   }
-  const modeText = () => state.time === "full" ? "cả ngày" : isHalf() ? (shiftById(state.time).label.toLowerCase()) : "chưa chọn buổi";
-  function renderPeopleTitle() { const t = $("#peopleTitle"); if (t) t.textContent = `${state.people} người · ${modeText()}`; }
   function renderEvening() {
     const box = $("#eveningBox"); if (!box) return;
     if (!(EV.price > 0)) { box.innerHTML = ""; return; }
@@ -357,7 +352,7 @@
   }
   function renderDateNote() { const n = $("#dateNote"); if (n) n.textContent = state.date ? `Đã chọn: ${dateLabel(state.date)}` : "Ngày mờ là đã kín lịch hoặc thám tử nghỉ."; }
   // Vẽ lại các phần phụ thuộc ngày / buổi (không vẽ lại cả form để không mất chỗ đang gõ)
-  function renderSlots() { renderShift(); renderPeopleTitle(); renderEvening(); renderDateNote(); }
+  function renderSlots() { renderShift(); renderEvening(); renderDateNote(); }
   function renderAddons() {
     const box = $("#addonBox"); if (!box) return;
     box.innerHTML = ADDONS.map(a => { const q = state.addons[a.id] || 0;
@@ -389,12 +384,6 @@
 
       <div class="field" data-field="time"><span class="label">Chụp cả ngày hay nửa ngày</span><div id="shiftBox"></div><span class="err"></span></div>
 
-      <div class="people-box">
-        <p class="people-title" id="peopleTitle"></p>
-        <input type="range" name="people" min="1" max="${MAX_PEOPLE}" step="1" value="${state.people}" aria-label="Số người chụp" />
-        <div class="people-ticks" aria-hidden="true">${Array.from({ length: MAX_PEOPLE }, (_, i) => `<span>${i + 1}</span>`).join("")}</div>
-        <p class="hint">Mặc định 1 người. Kéo sang phải nếu chụp nhóm, tối đa ${MAX_PEOPLE} người.${s && s.pricePerPerson > 0 ? ` Thêm ${money(s.pricePerPerson)} mỗi người từ người thứ 2.` : ""}</p>
-      </div>
 
       ${f("name", "Tên bạn", "text", c.name, "Nguyễn Văn A", 'autocomplete="name"')}
       ${f("phone", "Số điện thoại", "tel", c.phone, "0901 234 567", 'autocomplete="tel" inputmode="tel"', "Team gọi / nhắn Zalo số này để xác nhận.")}
@@ -488,8 +477,7 @@
       + row("Thám tử", p ? p.name : state.photographerId === "any" ? "Team sắp xếp" : "—")
       + (STAFF.length ? row("Staff take care", state.staffId !== "any" && stById(state.staffId) ? esc(stById(state.staffId).name) : "Team sắp xếp") : "")
       + row("Địa điểm", z.short + (state.address ? " · " + esc(state.address) : ""))
-      + row("Lịch", state.date ? `${dateLabel(state.date).replace(/, (\d+)\/(\d+)\/\d+/, " $1/$2")}${state.time ? " · " + (shiftById(state.time) || {}).label : ""}${state.evening ? " + tối" : ""}` : "—")
-      + row("Số người", `${state.people || 1} người`);
+      + row("Lịch", state.date ? `${dateLabel(state.date).replace(/, (\d+)\/(\d+)\/\d+/, " $1/$2")}${state.time ? " · " + (shiftById(state.time) || {}).label : ""}${state.evening ? " + tối" : ""}` : "—");
     html += `<hr class="sum-sep" />` + q.rows.map(([k, v]) => row(k, money(v))).join("");
     html += `<hr class="sum-sep" /><div class="sum-total"><span>Tạm tính${q.needsQuote ? "*" : ""}</span><strong id="sumTotal">${money(q.total)}</strong></div>`
       + `<div class="sum-row sum-deposit"><span>Đặt cọc ${S.depositPercent}%</span><span>${money(q.deposit)}</span></div>`
@@ -521,7 +509,7 @@
     btnNext.disabled = true; btnNext.textContent = "Đang gửi…";
     const q = quote(), ph = assignedPhotographer();
     const payload = { serviceId: state.serviceId, photographerId: state.photographerId, staffId: state.staffId || "any", zoneId: state.zoneId, address: state.address, nights: state.nights,
-      date: state.date, time: state.time, people: state.people || 1, evening: !!state.evening, addons: state.addons, products: {}, customer: state.customer };
+      date: state.date, time: state.time, evening: !!state.evening, addons: state.addons, products: {}, customer: state.customer };
     let code, photographerName = null, staffName = null, transferNote = null, payTo = null, viewToken = null;
     if (HAS_API) {
       try {
@@ -582,7 +570,7 @@
       <div class="sum-box">
         ${row("Gói chụp", s.name)}${row("Thám tử", b.photographerName || (ph ? ph.name : "Team sắp xếp"))}${b.staffName ? row("Staff take care", esc(b.staffName)) : ""}
         ${row("Địa điểm", `${z.short} · ${esc(b.address)}`)}
-        ${row("Lịch chụp", `${dateLabel(b.date)} · ${shiftText(b.time)}${b.evening ? ` + tối đến ${EV.end}` : ""} · ${b.people} người`)}
+        ${row("Lịch chụp", `${dateLabel(b.date)} · ${shiftText(b.time)}${b.evening ? ` + tối đến ${EV.end}` : ""}`)}
         ${row("Người đặt", `${esc(b.customer.name)} · ${esc(b.customer.phone)}`)}
         ${row("Tổng tạm tính", money(q.total) + (q.needsQuote ? "*" : ""), true)}${row("Cần đặt cọc", `<span style="color:var(--accent)">${money(q.deposit)}</span>`, true)}
       </div>
@@ -861,7 +849,6 @@
   view.addEventListener("input", e => {
     const el = e.target;
     if (el.name === "address") { state.address = el.value; refreshSummary(); }
-    else if (el.name === "people") { state.people = Number(el.value) || 1; renderPeopleTitle(); refreshSummary(); }
     else if (["name", "phone", "email", "note"].includes(el.name)) { state.customer[el.name] = el.value; save(); }
   });
   view.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); btnNext.click(); } });
