@@ -123,9 +123,10 @@
       fields: [["name", "Tên dịch vụ", "text"], ["price", "Giá (đ)", "money"], ["unit", "Đơn vị", "text"], ["max", "Tối đa mỗi đơn (trống = 10)", "optnumber"], ["extraMinutes", "Thêm phút chụp / đơn vị", "optnumber"], ["tone", "Màu ảnh giữ chỗ", "tone"], ["desc", "Mô tả", "textarea", "full"]] },
     zones: { title: "Phí chụp ngoài tỉnh", intro: "Team không có studio: mọi buổi chụp ở địa điểm khách chọn. Đặt phí di chuyển theo vùng, phí lưu trú, số ngày đặt trước. “Chiếm trọn ngày” khóa cả ngày của thám tử (và số đêm ở lại).", prefix: "z",
       blank: () => ({ name: "Vùng mới · Mô tả", short: "Vùng mới", fee: 0, perNight: 0, leadDays: 1, quote: false, fullDay: true, examples: "", note: "" }),
-      side: x => (x.quote ? "Báo giá riêng" : x.fee ? money(x.fee) + (x.feeMax > x.fee ? " – " + money(x.feeMax) : "") : "Miễn phí"), sub: x => `${x.examples} · đặt trước ${x.leadDays} ngày`,
+      side: x => (x.contact ? "Liên hệ team" : x.quote ? "Báo giá riêng" : x.fee ? money(x.fee) + (x.feeMax > x.fee ? " – " + money(x.feeMax) : "") : "Miễn phí"), sub: x => `${x.examples} · đặt trước ${x.leadDays} ngày`,
       
-      fields: [["name", "Tên đầy đủ", "text"], ["short", "Tên ngắn", "text"], ["fee", "Phí di chuyển / buổi (đ)", "money"], ["feeMax", "Phí tối đa (đ), để 0 nếu giá cố định", "money"], ["leadDays", "Đặt trước tối thiểu (ngày)", "number"], ["quote", "Báo giá riêng (vé thực tế)", "bool"], ["fullDay", "Chiếm trọn ngày của thám tử", "bool"],
+      fields: [["name", "Tên đầy đủ", "text"], ["short", "Tên ngắn", "text"], ["contact", "Liên hệ team — không nhập giá, thám tử tự báo giá qua inbox", "bool", "full"],
+        ["fee", "Phí di chuyển / buổi (đ)", "money", "", x => x.contact], ["feeMax", "Phí tối đa (đ), để 0 nếu giá cố định", "money", "", x => x.contact], ["leadDays", "Đặt trước tối thiểu (ngày)", "number"], ["quote", "Báo giá riêng (vé thực tế)", "bool", "", x => x.contact], ["fullDay", "Chiếm trọn ngày của thám tử", "bool"],
         ["examples", "Ví dụ khu vực", "text", "full"], ["note", "Ghi chú hiển thị", "text", "full"]] },
   };
 
@@ -224,7 +225,7 @@
             </span>
           </summary>
           <div class="row-body"><div class="form-grid">
-            ${cfg.fields.map(([k, l, t, cls]) => input(`${section}.${i}.${k}`, l, t, x[k], cls || "")).join("")}
+            ${cfg.fields.filter(f => !(f[4] && f[4](x))).map(([k, l, t, cls]) => input(`${section}.${i}.${k}`, l, t, x[k], cls || "")).join("")}
             <div class="field full"><span class="id-tag">Mã: ${esc(x.id)}</span></div>
           </div></div>
         </details>`).join("") || `<div class="empty">Chưa có mục nào.</div>`}</div>`;
@@ -340,7 +341,8 @@
           ${input("hero.btnGhost", "Chữ nút phụ (tới Gói chụp)", "text", h.btnGhost, "half")}
           <div class="field full"><span class="label" style="font-size:13px;font-weight:500">Các con số thống kê (tối đa 4)</span>
             <div class="stat-rows">${h.stats.map((s, i) => `<div class="stat-row">
-              <input type="text" data-path="hero.stats.${i}.value" data-type="text" value="${esc(s.value)}" placeholder="VD: 2.400+" aria-label="Con số ${i + 1}" />
+              <select data-path="hero.stats.${i}.auto" data-type="text" data-rerender aria-label="Cách tính con số ${i + 1}">${STAT_AUTO.map(([k, l]) => `<option value="${k}" ${(s.auto || "") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+              ${s.auto ? `<span class="stat-auto">${esc(window.statValue(s.auto, adminLive()))}</span>` : `<input type="text" data-path="hero.stats.${i}.value" data-type="text" value="${esc(s.value)}" placeholder="VD: 2.400+" aria-label="Con số ${i + 1}" />`}
               <input type="text" data-path="hero.stats.${i}.label" data-type="text" value="${esc(s.label)}" placeholder="VD: hồ sơ đã khép" aria-label="Mô tả con số ${i + 1}" />
               <button type="button" class="icon-btn danger" data-stat-del="${i}" aria-label="Xóa con số ${i + 1}">✕</button></div>`).join("")}</div>
             ${h.stats.length < 4 ? `<button type="button" class="link-btn" data-stat-add style="margin-top:8px;align-self:flex-start">+ Thêm con số</button>` : ""}</div>
@@ -373,8 +375,14 @@
       </div>`;
     updateHeroPreview();
   }
+  // Con số trang chủ: tự tính hay nhập tay
+  const STAT_AUTO = [["", "Nhập tay"], ["closed", "Tự tính: hồ sơ khép"], ["rating", "Tự tính: đánh giá"], ["team", "Tự tính: số thám tử"]];
+  function adminLive() {
+    const rv = bookings.filter(b => b.review && b.review.stars);
+    return { closed: bookings.filter(b => b.status === "done").length, team: draft.photographers.length, rating: rv.length ? Math.round(rv.reduce((s, b) => s + b.review.stars, 0) / rv.length * 10) / 10 : null };
+  }
   function updateHeroPreview() {
-    const ctx = { coc: draft.studio.depositPercent, team: draft.studio.name };
+    const ctx = { coc: draft.studio.depositPercent, team: draft.studio.name, live: adminLive() };
     const p = $("#heroPreview"); if (p && window.renderHeroVisual) p.innerHTML = window.renderHeroVisual(draft.hero);
     const cp = $("#heroCopyPreview"); if (cp && window.renderHeroCopy) cp.innerHTML = window.renderHeroCopy(draft.hero, ctx);
   }
@@ -415,7 +423,9 @@
           <div><b>${esc(b.customer.name)}</b> · <a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a>${b.customer.instagram ? ` · <a href="https://instagram.com/${encodeURIComponent(b.customer.instagram)}" target="_blank" rel="noopener">IG @${esc(b.customer.instagram)}</a>` : ""}${b.customer.email ? `<small>${esc(b.customer.email)}</small>` : ""}
             <small>${esc(b.serviceName)} · ${esc(b.photographerName)}${b.staffName ? " · Staff: " + esc(b.staffName) : ""}</small>
             <small>${esc(b.zoneName)}${b.address ? " · " + esc(b.address) : ""}${b.nights ? ` · ${b.nights} đêm` : ""}${b.fullDay ? " · khóa trọn ngày" : ""}</small>
-            ${b.customer.note ? `<small>Ghi chú khách: “${esc(b.customer.note)}”</small>` : ""}</div>
+            ${b.customer.note ? `<small>Ghi chú khách: “${esc(b.customer.note)}”</small>` : ""}
+            ${b.review ? `<small class="rv-line">Khách đánh giá ${"★".repeat(b.review.stars)}${"☆".repeat(5 - b.review.stars)}${b.review.text ? ` · “${esc(b.review.text)}”` : ""}</small>`
+              : b.status === "done" && b.viewToken ? `<small><button type="button" class="link-btn" data-copy-text="${esc(location.origin + "/?danhgia=" + encodeURIComponent(b.code) + "&t=" + b.viewToken)}">Sao chép link đánh giá</button> gửi khách qua Zalo / Instagram</small>` : ""}</div>
           <div><span class="money">${money(b.total)}${b.needsQuote ? "*" : ""}</span><small>Cọc ${money(b.deposit)}</small>
             ${b.transferNote ? `<small>Nội dung CK: <b style="font-family:var(--font-mono)">${esc(b.transferNote)}</b></small>` : ""}
             ${(b.payments || []).length ? `<small class="paid-line">Đã nhận ${money(b.payments.reduce((s, x) => s + x.amount, 0))} tự động${b.depositedAt ? " · " + new Date(b.depositedAt).toLocaleString("vi-VN") : ""}</small>` : ""}
@@ -683,6 +693,7 @@
     if (path.startsWith("sections.") || path.startsWith("studio.depositPercent")) updateHeroPreview();
     if (path.startsWith("hero.")) { updateHeroPreview(); if (path === "hero.photoTone" && !draft.hero.photo) { const pv = $(".img-preview.square"); if (pv) pv.className = "img-preview square ph-" + v; } }
     if (/(^studio|\.\d+)\.payment\./.test(path)) updatePayPreview();
+    if (el.dataset.rerender !== undefined || /^zones\.\d+\.contact$/.test(path)) renderSection(); // bật "Liên hệ team" thì ẩn các ô giá // đổi "Nhập tay" ↔ "Tự tính" thì vẽ lại ô
   }
   $("#content").addEventListener("input", e => { if (e.target.dataset.path && e.target.type !== "checkbox" && e.target.type !== "radio") onEdit(e.target); if (e.target.id === "bkSearch") { bkQuery = e.target.value; const pos = e.target.selectionStart; renderSection(); const s = $("#bkSearch"); s.focus(); s.setSelectionRange(pos, pos); } });
   /* ---------------- Tải ảnh (thu nhỏ trên trình duyệt rồi gửi lên) ---------------- */

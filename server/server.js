@@ -149,7 +149,7 @@ function validateHero(h) {
     stampTitle: clean(String(h.stampTitle), 16), stampSub: clean(String(h.stampSub), 30), showStamp: h.showStamp !== false, showMagnifier: h.showMagnifier !== false,
     folderTone: tone(h.folderTone) };
   for (const [k, max] of Object.entries(HERO_TEXT_LIMITS)) if (typeof src[k] === "string") out[k] = clean(src[k], max);
-  if (Array.isArray(src.stats)) out.stats = arr(src.stats, "Con số thống kê", 4).map(s => ({ value: clean(String((s && s.value) || ""), 12), label: clean(String((s && s.label) || ""), 30) })).filter(s => s.value || s.label);
+  if (Array.isArray(src.stats)) out.stats = arr(src.stats, "Con số thống kê", 4).map(s => ({ value: clean(String((s && s.value) || ""), 12), label: clean(String((s && s.label) || ""), 30), auto: STAT_AUTO.includes(s && s.auto) ? s.auto : "" })).filter(s => s.value || s.label || s.auto);
   return out;
 }
 // Tiêu đề các mục trang chủ (chỉ nhận đúng các mục/trường đã biết)
@@ -201,7 +201,7 @@ function validateSite(d) {
   uniqueIds(products, "sản phẩm");
   const zones = arr(d.zones, "Vùng", 80).map(x => ({ id: idOf(x.id, "vùng"), name: req(x.name, "tên vùng", 80), short: req(x.short, "tên ngắn", 30), fee: int(x.fee || 0, "Phí vùng"),
     feeMax: int(x.feeMax || 0, "Phí tối đa") > int(x.fee || 0, "Phí vùng") ? int(x.feeMax, "Phí tối đa") : 0, // giá khoảng: đơn tính mức thấp (fee), hiển thị fee – feeMax
-    perNight: int(x.perNight || 0, "Phí lưu trú"), leadDays: int(x.leadDays || 0, "Số ngày đặt trước", 0, 90), quote: !!x.quote, fullDay: !!x.fullDay,
+    perNight: int(x.perNight || 0, "Phí lưu trú"), leadDays: int(x.leadDays || 0, "Số ngày đặt trước", 0, 90), quote: !!x.quote, contact: !!x.contact, fullDay: !!x.fullDay,
     examples: clean(x.examples || "", 160), note: clean(x.note || "", 200) }));
   uniqueIds(zones, "vùng"); if (!zones.length) throw new Invalid("Cần ít nhất 1 khu vực chụp");
   const shifts = validateShifts(d.shifts);
@@ -216,6 +216,13 @@ function validateSite(d) {
    site.shifts = { morning: {start, end}, afternoon: {start, end} } — "Cả ngày" = sáng.start → chiều.end */
 const DEFAULT_SHIFTS = { morning: { start: "08:00", end: "12:00" }, afternoon: { start: "13:00", end: "17:00" } };
 const SHIFT_IDS = ["morning", "afternoon", "full"];
+// Con số tự tính trên trang chủ: hồ sơ đã khép (đơn Hoàn tất), điểm đánh giá trung bình của khách, số thám tử
+const STAT_AUTO = ["closed", "rating", "team"];
+function liveStats(site, bookings) {
+  const rv = bookings.filter(b => b.review && b.review.stars);
+  return { closed: bookings.filter(b => b.status === "done").length, team: (site.photographers || []).length,
+    rating: rv.length ? Math.round(rv.reduce((s, b) => s + b.review.stars, 0) / rv.length * 10) / 10 : null, reviews: rv.length };
+}
 // Dịch vụ đi kèm của thám tử (dữ liệu cũ chưa tách thì dùng danh sách chung)
 const phAddons = (site, p) => p.addons || site.addons || [];
 // Chụp thêm buổi tối (nối tiếp buổi chiều / cả ngày). Giá 0 = không nhận. Chưa cài: mặc định đến 20:00, 500.000đ
@@ -291,8 +298,8 @@ function priceBooking(site, b) {
     if (b.time === "morning") throw new Invalid("Buổi tối chỉ nhận khi chụp cả ngày hoặc buổi chiều");
     total += ev.price; lines.push([`Chụp thêm buổi tối đến ${ev.end}`, ev.price]);
   }
-  if (z.fee) { total += z.fee; lines.push(["Phí đi tỉnh · " + z.short, z.fee]); }
-  const nights = z.perNight && !z.quote ? int(b.nights || 0, "Số đêm", 0, 10) : 0;
+  if (z.fee && !z.contact) { total += z.fee; lines.push(["Phí đi tỉnh · " + z.short, z.fee]); } // "Liên hệ team": thám tử tự báo giá qua inbox
+  const nights = z.perNight && !z.quote && !z.contact ? int(b.nights || 0, "Số đêm", 0, 10) : 0;
   if (nights) { total += z.perNight * nights; lines.push([`Lưu trú × ${nights} đêm`, z.perNight * nights]); }
   let minutes = 0; // gói không còn thời lượng; chỉ dịch vụ "thêm phút" mới kéo dài buổi chụp
   const pick = (bag, list, label) => { const out = {}; for (const [id, q] of Object.entries(bag || {})) { const it = list.find(x => x.id === id); if (!it) throw new Invalid(`${label} không tồn tại`); const n = int(q, "Số lượng", 0, it.max || 10); if (n) { out[id] = n; total += it.price * n; lines.push([`${it.name} × ${n}`, it.price * n]); if (it.extraMinutes) minutes += it.extraMinutes * n; } } return out; };
@@ -300,7 +307,7 @@ function priceBooking(site, b) {
   const addons = pick(b.addons, p ? phAddons(site, p) : [], "Dịch vụ"), products = pick(b.products, site.products, "Sản phẩm");
   if (b.time !== "full") { const [st, en] = shiftRange(site.shifts, b.time); if (minutes > en - st) throw new Invalid(`Buổi chụp cần ${Math.ceil(minutes / 60)} tiếng, dài hơn nửa buổi. Chọn “Cả ngày”.`); }
   const deposit = Math.round(total * site.studio.depositPercent / 100 / 1000) * 1000;
-  return { service: s, zone: z, photographer: p, evening, eveningEnd: evening ? ev.end : "", nights, addons, products, lines, total, deposit, minutes, needsQuote: !!z.quote };
+  return { service: s, zone: z, photographer: p, evening, eveningEnd: evening ? ev.end : "", nights, addons, products, lines, total, deposit, minutes, needsQuote: !!(z.quote || z.contact) };
 }
 
 /* ---------------- Lịch bận theo đơn thật ----------------
@@ -537,7 +544,23 @@ async function api(req, res, url) {
   const p = url.pathname, method = req.method;
   if (method !== "GET" && !sameOrigin(req)) return send(res, 403, { error: "Sai nguồn gửi" });
 
-  if (p === "/api/data" && method === "GET") return send(res, 200, publicSite(await readJSON(FILES.site)));
+  if (p === "/api/data" && method === "GET") { const site = await readJSON(FILES.site); return send(res, 200, { ...publicSite(site), live: liveStats(site, await readJSON(FILES.bookings, [])) }); }
+  // Khách đánh giá buổi chụp (link riêng team gửi sau khi hồ sơ "Hoàn tất")
+  if (p === "/api/bookings/review" && (method === "GET" || method === "POST")) {
+    const b = method === "POST" ? await readBody(req, 5000) : null;
+    const code = String((b ? b.code : url.searchParams.get("code")) || ""), t = String((b ? b.t : url.searchParams.get("t")) || "");
+    return withBookingLock(async () => {
+      const all = await readJSON(FILES.bookings, []), bk = all.find(x => x.code === code);
+      if (!bk || !bk.viewToken || !safeEqual(t, bk.viewToken)) return send(res, 404, { error: "Không tìm thấy hồ sơ" });
+      const info = () => ({ code: bk.code, serviceName: bk.serviceName, photographerName: bk.photographerName, date: bk.date, customerName: bk.customer.name, done: bk.status === "done", review: bk.review || null });
+      if (method === "GET") return send(res, 200, info());
+      if (bk.status !== "done") throw new Invalid("Hồ sơ chưa khép — bạn đánh giá sau buổi chụp nhé");
+      if (bk.review) throw new Invalid("Hồ sơ này đã được đánh giá rồi");
+      bk.review = { stars: int(b.stars, "Số sao", 1, 5), text: clean(String(b.text || ""), 500), at: new Date().toISOString() };
+      await writeJSON(FILES.bookings, all);
+      return send(res, 200, info());
+    });
+  }
   // Chỉ trả về giờ bận theo thám tử — không lộ thông tin khách
   if (p === "/api/availability" && method === "GET") return send(res, 200, serializeBusy(busyMap(await readJSON(FILES.bookings, []), (await readJSON(FILES.site)).shifts, todayKey(), await readBlocks())));
 

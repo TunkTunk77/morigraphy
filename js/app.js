@@ -13,7 +13,7 @@
     const d = await (window.__MG_DATA || fetch("/api/data", { cache: "no-store" }).then(r => r.ok ? r.json() : null));
     if (d) {
       Object.assign(window, { HERO: d.hero || window.HERO, SECTIONS: d.sections || {}, STUDIO: d.studio, CATEGORIES: d.categories, SERVICES: d.services, PHOTOGRAPHERS: d.photographers, STAFF: d.staff || [], ADDONS: d.addons,
-        PRODUCTS: d.products, TRAVEL_ZONES: d.zones, SHIFTS: d.shifts || window.SHIFTS, BOOKING_WINDOW_DAYS: d.bookingWindowDays, EVENING: d.evening });
+        PRODUCTS: d.products, TRAVEL_ZONES: d.zones, SHIFTS: d.shifts || window.SHIFTS, BOOKING_WINDOW_DAYS: d.bookingWindowDays, EVENING: d.evening, LIVE: d.live || {} });
       HAS_API = true;
     }
   } catch (e) { /* chạy tĩnh */ }
@@ -164,12 +164,12 @@
     const stp = state.staffId && state.staffId !== "any" ? stById(state.staffId) : null;
     if (stp && stp.price) { rows.push([`Staff take care · ${stp.name}`, stp.price]); total += stp.price; }
     if (state.evening && EV.price > 0) { rows.push([`Chụp thêm buổi tối đến ${EV.end}`, EV.price]); total += EV.price; }
-    if (z.fee) { rows.push([`Phí di chuyển · ${z.short}${z.feeMax > z.fee ? " (mức thấp)" : ""}`, z.fee]); total += z.fee; }
-    if (z.perNight && state.nights) { const v = z.perNight * state.nights; rows.push([`Lưu trú ekip × ${state.nights} đêm`, v]); total += v; }
+    if (z.fee && !z.contact) { rows.push([`Phí di chuyển · ${z.short}${z.feeMax > z.fee ? " (mức thấp)" : ""}`, z.fee]); total += z.fee; }
+    if (z.perNight && state.nights && !z.contact) { const v = z.perNight * state.nights; rows.push([`Lưu trú ekip × ${state.nights} đêm`, v]); total += v; }
     for (const a of curAddons()) { const q = state.addons[a.id] || 0; if (q) { rows.push([`${a.name} × ${q}`, a.price * q]); total += a.price * q; } }
     for (const pr of PRODUCTS) { const q = state.products[pr.id] || 0; if (q) { rows.push([`${pr.name} × ${q}`, pr.price * q]); total += pr.price * q; } }
     const deposit = Math.round(total * S.depositPercent / 100 / 1000) * 1000;
-    return { rows, total, deposit, needsQuote: !!z.quote };
+    return { rows, total, deposit, needsQuote: !!(z.quote || z.contact) };
   }
 
   /* ---------------- Trang chủ ---------------- */
@@ -177,7 +177,7 @@
     if (window.renderHeroVisual && $("#heroVisual")) $("#heroVisual").innerHTML = window.renderHeroVisual(window.HERO);
     // Chữ trang chủ do admin chỉnh (mục "Trang chủ"); chuỗi rỗng = ẩn dòng
     const ctx = { coc: S.depositPercent, team: S.name };
-    if (window.renderHeroCopy && $("#heroCopy")) $("#heroCopy").innerHTML = window.renderHeroCopy(window.HERO, ctx);
+    if (window.renderHeroCopy && $("#heroCopy")) $("#heroCopy").innerHTML = window.renderHeroCopy(window.HERO, { ...ctx, live: window.LIVE });
     if (window.mergeSections) {
       const secs = window.mergeSections(window.SECTIONS);
       $$("[data-k]").forEach(el => { const [k, f] = el.dataset.k.split("."); const v = (secs[k] || {})[f];
@@ -298,11 +298,17 @@
   /* Chụp ngoài tỉnh: chọn nơi chụp + số thám tử → xem phụ phí; bảng đầy đủ gập lại bên dưới */
   const tvState = { zoneId: "", count: 1 };
   const zoneTitle = z => (z.name.split("·")[1] || z.name).trim();
-  const zoneFeeText = z => z.quote ? "Báo giá riêng" : z.fee ? feeRange(z) : "Miễn phí";
+  const zoneFeeText = z => z.contact ? "Liên hệ team" : z.quote ? "Báo giá riêng" : z.fee ? feeRange(z) : "Miễn phí";
+  const chatBtns = () => `<div class="chat-links">${chatLinks().map(([l, h, k]) => `<a class="chat-link chat-${k}" href="${esc(h)}" ${k === "call" || k === "sms" ? "" : 'target="_blank" rel="noopener"'}>${esc(l)}</a>`).join("")}</div>`;
   function travelResult() {
     const z = ZONES.find(x => x.id === tvState.zoneId);
     if (!z) return `<p class="tv-hint">Chọn nơi chụp để xem phụ phí.</p>`;
     const n = tvState.count, per = n > 1 ? ` <small>(${feeRange(z)} × ${n} thám tử)</small>` : "";
+    if (z.contact) { smsText = `Chào ${S.name}, mình muốn hỏi phí chụp ở ${zoneTitle(z)}.`; return `<div class="tv-result" aria-live="polite">
+        <p class="tv-fee">Phụ phí di chuyển: <strong>Liên hệ team</strong> <small>· thám tử báo giá riêng qua inbox</small></p>
+        ${[z.fullDay ? "Chỉ nhận lịch cả ngày" : "", z.leadDays ? `Đặt trước ít nhất ${z.leadDays} ngày` : ""].filter(Boolean).length ? `<p class="tv-extra">${[z.fullDay ? "Chỉ nhận lịch cả ngày" : "", z.leadDays ? `Đặt trước ít nhất ${z.leadDays} ngày` : ""].filter(Boolean).join(" · ")}</p>` : ""}
+        ${chatBtns()}
+        <button type="button" class="link-btn" data-pick-zone="${z.id}">Chọn nơi này khi đặt lịch →</button></div>`; }
     const main = z.quote ? `<strong>Báo giá riêng</strong>${z.fee ? ` <small>· công tác phí từ ${money(z.fee * n)}/ngày + vé thực tế</small>` : ""}`
       : z.fee ? `<strong>${feeRange(z, n)}</strong> / buổi${per}` : `<strong>Miễn phí di chuyển</strong>`;
     const extra = [
@@ -334,7 +340,7 @@
         <summary>Xem bảng phụ phí ${ZONES.length} địa điểm</summary>
         <ul class="tv-list">${ZONES.map(z => { const sub = z.examples || z.note || "";
           return `<li><div><b>${esc(zoneTitle(z))}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</div>
-            <div class="tv-price"><strong>${zoneFeeText(z)}</strong>${z.fee && !z.quote ? "<small>/ 1 thám tử</small>" : ""}</div></li>`; }).join("")}</ul>
+            <div class="tv-price"><strong>${zoneFeeText(z)}</strong>${z.fee && !z.quote && !z.contact ? "<small>/ 1 thám tử</small>" : ""}</div></li>`; }).join("")}</ul>
       </details>
       ${notes ? `<ul class="tv-notes reveal">${notes}</ul>` : ""}`;
   }
@@ -415,10 +421,10 @@
       <div class="field" data-field="date"><span class="label">Ngày chụp</span><div id="calendar"></div><p class="hint" id="dateNote"></p><span class="err"></span></div>
 
       <div class="field" data-field="zone"><label for="f_zone">Tỉnh / thành chụp</label>
-        <select id="f_zone" name="zone">${ZONES.map(zz => `<option value="${zz.id}" ${zz.id === state.zoneId ? "selected" : ""}>${esc(zz.name)} · ${zz.fee ? (zz.quote ? "báo giá riêng" : "+" + feeRange(zz)) : "miễn phí đi lại"}</option>`).join("")}</select>
-        ${z.leadDays || z.quote ? `<span class="hint">${z.leadDays ? `Đặt trước ít nhất ${z.leadDays} ngày. ` : ""}${z.quote ? esc(z.note || "") + " Tạm tính chưa gồm vé di chuyển." : ""}</span>` : ""}</div>
+        <select id="f_zone" name="zone">${ZONES.map(zz => `<option value="${zz.id}" ${zz.id === state.zoneId ? "selected" : ""}>${esc(zz.name)} · ${zz.contact ? "liên hệ báo giá" : zz.fee ? (zz.quote ? "báo giá riêng" : "+" + feeRange(zz)) : "miễn phí đi lại"}</option>`).join("")}</select>
+        ${z.leadDays || z.quote || z.contact ? `<span class="hint">${z.leadDays ? `Đặt trước ít nhất ${z.leadDays} ngày. ` : ""}${z.contact ? "Phí đi lại thám tử báo giá riêng qua inbox." : z.quote ? esc(z.note || "") + " Tạm tính chưa gồm vé di chuyển." : ""}</span>` : ""}</div>
       ${f("address", "Địa điểm cụ thể (trường, quận/huyện)", "text", state.address, "VD: ĐH Thương Mại, Cầu Giấy", 'autocomplete="street-address"')}
-      ${z.perNight && !z.quote ? `<div class="field"><label for="f_nights">Ekip ở lại qua đêm</label>
+      ${z.perNight && !z.quote && !z.contact ? `<div class="field"><label for="f_nights">Ekip ở lại qua đêm</label>
         <select id="f_nights" name="nights">${[0, 1, 2, 3].map(n => `<option value="${n}" ${n === state.nights ? "selected" : ""}>${n ? n + " đêm · +" + money(z.perNight * n) : "Không, đi về trong ngày"}</option>`).join("")}</select></div>` : ""}
 
       <div id="eveningBox"></div>
@@ -503,7 +509,7 @@
     html += `<hr class="sum-sep" />` + q.rows.map(([k, v]) => row(k, money(v))).join("");
     html += `<hr class="sum-sep" /><div class="sum-total"><span>Tạm tính${q.needsQuote ? "*" : ""}</span><strong id="sumTotal">${money(q.total)}</strong></div>`
       + `<div class="sum-row sum-deposit"><span>Đặt cọc ${S.depositPercent}%</span><span>${money(q.deposit)}</span></div>`
-      + `<p class="sum-fine">${q.needsQuote ? "* Chưa gồm vé di chuyển xa, team báo giá riêng. " : ""}${z.feeMax > z.fee ? `Phí di chuyển ${esc(z.short)} thực tế từ ${money(z.fee)} đến ${money(z.feeMax)}, team báo chính xác khi gọi. ` : ""}Thanh toán phần còn lại sau buổi chụp.</p>`;
+      + `<p class="sum-fine">${z.contact ? "* Phí đi lại thám tử báo giá riêng qua inbox. " : q.needsQuote ? "* Chưa gồm vé di chuyển xa, team báo giá riêng. " : ""}${z.feeMax > z.fee && !z.contact ? `Phí di chuyển ${esc(z.short)} thực tế từ ${money(z.fee)} đến ${money(z.feeMax)}, team báo chính xác khi gọi. ` : ""}Thanh toán phần còn lại sau buổi chụp.</p>`;
     $("#summaryBody").innerHTML = html;
     if (prevTotal != null && prevTotal !== q.total && M.pulse) M.pulse($("#sumTotal"));
   }
@@ -560,7 +566,7 @@
     sumRow("Tổng tạm tính", money(q.total) + (q.needsQuote ? "*" : ""), INK, true);
     sumRow(`Đặt cọc ${S.depositPercent}%`, money(q.deposit), RED);
     sumRow("Còn lại thanh toán ngày chụp", money(Math.max(0, q.total - (paid || q.deposit))), MUTED);
-    if (q.needsQuote) add(44, y0 => { x.fillStyle = MUTED; x.font = `italic 600 22px ${SANS}`; x.fillText("* Phí đi lại báo giá riêng theo vé thực tế.", P, y0 + 30); });
+    if (q.needsQuote) add(44, y0 => { x.fillStyle = MUTED; x.font = `italic 600 22px ${SANS}`; x.fillText((zoneById(b.zoneId) || {}).contact ? "* Phí đi lại thám tử báo giá riêng qua inbox." : "* Phí đi lại báo giá riêng theo vé thực tế.", P, y0 + 30); });
     add(30, () => {}); dash();
     const foot = [S.phone ? `Liên hệ team: ${S.phone} (Zalo)` : "", "Cảm ơn bạn đã gửi hồ sơ cho văn phòng thám tử ảnh!"].filter(Boolean);
     add(30 + foot.length * 40, y0 => { x.fillStyle = MUTED; x.font = `600 26px ${SANS}`; x.textAlign = "center"; foot.forEach((l, i) => x.fillText(l, W / 2, y0 + 44 + i * 40)); x.textAlign = "left"; });
@@ -643,6 +649,11 @@
   async function showSuccess(b, q, ph) {
     if (M.stepOut) await M.stepOut(view);
     const pay = payBlock(b, q);
+    // Gói có tick "Liên hệ team": hiện ngay các kênh chat với team trên trang đặt xong
+    const svc = svcById(b.serviceId), bz = zoneById(b.zoneId) || {}, contact = svc && (svc.contact || bz.contact) ? (() => {
+      smsText = `Chào ${S.name}, mình là ${b.customer.name}, mã hồ sơ ${b.code} (gói “${svc.name}”). Mình muốn trao đổi thêm với team.`;
+      return `<section class="success-contact" aria-label="Liên hệ team"><h4>Liên hệ team</h4><p class="sum-fine">${bz.contact ? `Nhắn team để thám tử báo phí đi lại ${esc(bz.short || bz.name)}.` : `Nhắn team để trao đổi thêm về gói “${esc(svc.name)}”.`}</p>
+        <div class="chat-links">${chatLinks().map(([l, h, k]) => `<a class="chat-link chat-${k}" href="${esc(h)}" ${k === "call" || k === "sms" ? "" : 'target="_blank" rel="noopener"'}>${esc(l)}</a>`).join("")}</div></section>`; })() : "";
     view.innerHTML = `<div class="success">
       <svg class="success-icon" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="40"/><path d="M26 41l9 9 19-20"/></svg>
       <h3 tabindex="-1">Hồ sơ đã được mở!</h3>
@@ -655,6 +666,7 @@
       ${pay && b.viewToken ? `<div class="deposit-status" id="depositStatus" role="status" aria-live="polite">
         <span class="dot-wait" aria-hidden="true"></span><div><b>Đang chờ tiền cọc…</b><small>Chuyển khoản xong, trang này tự cập nhật trong vài giây.</small></div>
         <button type="button" class="btn btn-ghost btn-sm" id="btnCheckPaid">Tôi đã chuyển khoản</button></div>` : ""}
+      ${contact}
       <div id="chatBox"></div>
       <div class="success-actions">
         <button type="button" class="btn btn-ghost" id="btnNew">Đặt lịch mới</button>
@@ -825,6 +837,44 @@
     if (M.modalIn) M.modalIn(dialog, $(".modal-backdrop", modal));
     dialog.focus();
   }
+  /* ---------------- Khách đánh giá buổi chụp: /?danhgia=MÃ&t=MÃ_BÍ_MẬT ---------------- */
+  let reviewStars = 0;
+  function reviewHTML(r, msg) {
+    const head = `<p class="eyebrow">Hồ sơ ${esc(r.code)}</p><h2 id="modalTitle">Đánh giá buổi chụp</h2>
+      <p class="sum-fine">${esc(r.serviceName)} · thám tử ${esc(r.photographerName)} · ${dateLabel(r.date)}</p>`;
+    const stars = (n, live) => `<div class="rv-stars"${live ? ' role="radiogroup" aria-label="Số sao"' : ""}>${[1, 2, 3, 4, 5].map(i => live
+      ? `<button type="button" class="rv-star${i <= n ? " is-on" : ""}" data-rv-star="${i}" role="radio" aria-checked="${i === n}" aria-label="${i} sao">${STAR}</button>`
+      : `<span class="rv-star${i <= n ? " is-on" : ""}">${STAR}</span>`).join("")}</div>`;
+    let body;
+    if (r.review) body = `${stars(r.review.stars)}${r.review.text ? `<p>“${esc(r.review.text)}”</p>` : ""}<p class="sum-fine">Cảm ơn ${esc(r.customerName)} đã đánh giá!</p>`;
+    else if (!r.done) body = `<p>Hồ sơ chưa khép. Sau buổi chụp, bạn mở lại link này để đánh giá nhé.</p>`;
+    else body = `${stars(reviewStars, true)}
+      <div class="field"><label for="rv_text">Cảm nhận của bạn <small>(không bắt buộc)</small></label><textarea id="rv_text" maxlength="500" placeholder="Buổi chụp thế nào?"></textarea></div>
+      <p class="err" id="rvErr" role="alert">${msg ? esc(msg) : ""}</p>
+      <button type="button" class="btn btn-primary" id="btnReview">Gửi đánh giá</button>`;
+    return `<div class="review-box">${head}${body}</div>`;
+  }
+  async function openReview(code, t) {
+    let r;
+    try { const res = await fetch(`/api/bookings/review?code=${encodeURIComponent(code)}&t=${encodeURIComponent(t)}`); r = await res.json(); if (!res.ok) throw new Error(r.error); }
+    catch (e) { toast(e.message || "Không mở được trang đánh giá"); return; }
+    reviewStars = 0; openReview.ctx = { code, t, r };
+    $("#modalBody").innerHTML = reviewHTML(r);
+    lastFocus = document.activeElement; modal.hidden = false; document.body.style.overflow = "hidden";
+    if (M.modalIn) M.modalIn(dialog, $(".modal-backdrop", modal));
+    dialog.focus();
+  }
+  async function sendReview() {
+    const { code, t } = openReview.ctx || {}, err = $("#rvErr"), btn = $("#btnReview");
+    if (!reviewStars) { err.textContent = "Chọn số sao nhé."; return; }
+    btn.disabled = true; btn.textContent = "Đang gửi…";
+    try {
+      const res = await fetch("/api/bookings/review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, t, stars: reviewStars, text: $("#rv_text").value }) });
+      const r = await res.json(); if (!res.ok) throw new Error(r.error);
+      $("#modalBody").innerHTML = reviewHTML(r); history.replaceState(null, "", location.pathname + location.hash);
+    } catch (e) { btn.disabled = false; btn.textContent = "Gửi đánh giá"; err.textContent = e.message || "Không gửi được, thử lại sau."; }
+  }
+
   async function closeModal() {
     if (modal.hidden) return;
     if (M.modalOut) await M.modalOut(dialog, $(".modal-backdrop", modal));
@@ -861,6 +911,8 @@
     }
     if (t.matches("[data-lightbox]")) { const [pid, j] = t.dataset.lightbox.split(":"); openLightbox(pid, Number(j), t); return; }
     if (t.matches("[data-close]")) { closeModal(); return; }
+    if (t.matches("[data-rv-star]")) { reviewStars = Number(t.dataset.rvStar); $$("[data-rv-star]").forEach(b => { const on = Number(b.dataset.rvStar) <= reviewStars; b.classList.toggle("is-on", on); b.setAttribute("aria-checked", String(Number(b.dataset.rvStar) === reviewStars)); }); $("#rvErr").textContent = ""; return; }
+    if (t.id === "btnReview") { sendReview(); return; }
     if (t.matches("[data-book-with]")) {
       const p = phById(t.dataset.bookWith); setPhotographer(p.id);
       if (state.serviceId && !p.services.includes(state.serviceId)) state.serviceId = null;
@@ -884,7 +936,7 @@
       changeQty("addon", id, 1); showForm(); toast(`Đã thêm ${it.name} · thám tử ${p.name}`); return;
     }
     if (t.matches("[data-pick-zone]")) {
-      const z = zoneById(t.dataset.pickZone); state.zoneId = z.id; if (!z.perNight || z.quote) state.nights = 0;
+      const z = zoneById(t.dataset.pickZone); state.zoneId = z.id; if (!z.perNight || z.quote || z.contact) state.nights = 0;
       if (state.date && fromKey(state.date) < earliestDay()) { state.date = null; state.time = null; }
       showForm({ scroll: true }); toast(`Đã chọn ${z.name}${state.serviceId ? "" : ". Chọn gói chụp nhé"}`);
       return;
@@ -929,7 +981,7 @@
     else if (el.name === "staff") { state.staffId = el.value; if (state.time && state.date && !slotOpen(state.date, state.time)) { state.time = null; toast("Staff này đã có lịch vào buổi đã chọn, chọn lại buổi nhé."); } renderCalendar(); renderSlots(); refreshSummary(); errEl.textContent = ""; }
     else if (el.name === "photographer") { setPhotographer(el.value); if (state.date && !dayOpen(fromKey(state.date))) { state.date = null; toast("Thám tử này không trống ngày đã chọn, chọn lại ngày nhé."); } if (state.time && state.date && !slotOpen(state.date, state.time)) state.time = null; rerender("f_photographer"); errEl.textContent = ""; }
     else if (el.name === "evening") { state.evening = el.checked && eveningOk(); refreshSummary(); }
-    else if (el.name === "zone") { const z = zoneById(el.value); state.zoneId = z.id; if (!z.perNight || z.quote) state.nights = 0;
+    else if (el.name === "zone") { const z = zoneById(el.value); state.zoneId = z.id; if (!z.perNight || z.quote || z.contact) state.nights = 0;
       if (state.date && fromKey(state.date) < earliestDay()) { state.date = null; state.time = null; toast(`${z.short} cần đặt trước ít nhất ${z.leadDays} ngày — chọn lại ngày nhé.`); }
       if (z.fullDay) state.time = "full"; rerender("f_zone"); }
     else if (el.name === "nights") {
@@ -962,6 +1014,7 @@
 
   /* ---------------- Khởi động ---------------- */
   renderStatic(); renderServices(); renderTeam(); renderExtras(); renderTravel();
+  { const q = new URLSearchParams(location.search); if (q.get("danhgia") && q.get("t") && HAS_API) openReview(q.get("danhgia"), q.get("t")); }
   showForm();
 
   /* ---------------- Mỗi mục menu là một trang riêng ----------------

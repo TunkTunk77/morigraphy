@@ -57,7 +57,15 @@
         ${h.btnPrimary ? `<a class="btn btn-primary" href="#booking">${f(h.btnPrimary)}</a>` : ""}
         ${h.btnGhost ? `<a class="btn btn-ghost" href="#services">${f(h.btnGhost)}</a>` : ""}
       </div>
-      ${(h.stats || []).length ? `<dl class="hero-stats hero-anim">${h.stats.map(s => `<div><dt>${f(s.value)}</dt><dd>${f(s.label)}</dd></div>`).join("")}</dl>` : ""}`;
+      ${(h.stats || []).length ? `<dl class="hero-stats hero-anim">${h.stats.map(s => `<div><dt>${s.auto ? esc(window.statValue(s.auto, ctx.live)) : f(s.value)}</dt><dd>${f(s.label)}</dd></div>`).join("")}</dl>` : ""}`;
+  };
+  /** Giá trị con số tự tính (live = { closed, rating, team } từ server) */
+  window.statValue = (auto, live) => {
+    live = live || {};
+    if (auto === "closed") return (live.closed || 0).toLocaleString("vi-VN");
+    if (auto === "team") return String(live.team || 0);
+    if (auto === "rating") return live.rating ? live.rating.toFixed(1) + "/5" : "—";
+    return "";
   };
 
   /** HTML của tập hồ sơ. h = dữ liệu hero (thiếu trường nào lấy mặc định). */
