@@ -107,7 +107,7 @@
     services: { title: "Gói chụp", intro: "Giá, thời lượng và nội dung các gói. Gói dài hơn nửa buổi thì khách chỉ chọn được “Cả ngày”.", prefix: "sv",
       blank: () => ({ name: "Gói mới", category: "Cá nhân", duration: 60, price: 1000000, tone: "stone", desc: "", includes: [] }),
       side: x => x.priceFull > 0 ? `${money(x.price)} · cả ngày ${money(x.priceFull)}` : money(x.price), sub: x => `${x.category} · ${x.duration} phút`,
-      fields: [["name", "Tên gói", "text"], ["category", "Danh mục", "text"], ["tone", "Màu ảnh giữ chỗ", "tone"], ["price", "Giá nửa ngày (đ)", "money"], ["priceFull", "Giá cả ngày (đ) — 0 là giống nửa ngày", "money"], ["duration", "Thời lượng (phút)", "number"],
+      fields: [["name", "Tên gói", "text"], ["category", "Danh mục", "text"], ["tone", "Màu ảnh giữ chỗ", "tone"], ["price", "Giá nửa ngày (đ)", "money"], ["priceFull", "Giá cả ngày (đ) — 0 là giống nửa ngày", "money"], ["duration", "Thời lượng (phút)", "number"], ["contact", "Hiện nút “Liên hệ team” trên gói", "bool"],
         ["desc", "Mô tả ngắn", "textarea", "full"], ["includes", "Bao gồm (mỗi dòng một ý)", "lines", "full"]] },
     photographers: { title: "Thám tử ảnh", intro: "Thông tin thợ, ngày làm việc, các gói nhận chụp và phụ phí khi khách chọn đích danh.", prefix: "ph",
       blank: () => ({ name: "Thám tử mới", phone: "", role: "Thám tử", years: 1, rating: 5, reviews: 0, surcharge: 0, tone: "stone", specialties: [], style: "", bio: "", workDays: [1, 2, 3, 4, 5, 6], services: [], avatar: "", portfolio: [] }),
@@ -401,7 +401,7 @@
         <article class="bk">
           <div><span class="code">${esc(b.code)}</span> <span class="status st-${b.status}">${STATUS[b.status]}</span>
             <span class="when">${esc(b.date.split("-").reverse().join("/"))} · ${esc(SHIFT_NAMES[b.time] || b.time)}${b.evening ? " + tối" : ""}</span><small>${b.minutes} phút · tạo ${new Date(b.createdAt).toLocaleString("vi-VN")}</small></div>
-          <div><b>${esc(b.customer.name)}</b> · <a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a>${b.customer.email ? `<small>${esc(b.customer.email)}</small>` : ""}
+          <div><b>${esc(b.customer.name)}</b> · <a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a>${b.customer.instagram ? ` · <a href="https://instagram.com/${encodeURIComponent(b.customer.instagram)}" target="_blank" rel="noopener">IG @${esc(b.customer.instagram)}</a>` : ""}${b.customer.email ? `<small>${esc(b.customer.email)}</small>` : ""}
             <small>${esc(b.serviceName)} · ${esc(b.photographerName)}${b.staffName ? " · Staff: " + esc(b.staffName) : ""}</small>
             <small>${esc(b.zoneName)}${b.address ? " · " + esc(b.address) : ""}${b.nights ? ` · ${b.nights} đêm` : ""}${b.fullDay ? " · khóa trọn ngày" : ""}</small>
             ${b.customer.note ? `<small>Ghi chú khách: “${esc(b.customer.note)}”</small>` : ""}</div>

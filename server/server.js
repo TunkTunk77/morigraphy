@@ -172,7 +172,7 @@ function validateSite(d) {
     area: clean(s.area || "", 200), openHours: clean(s.openHours || "", 120), facebook: url(s.facebook, "Facebook"), instagram: url(s.instagram, "Instagram"),
     depositPercent: int(s.depositPercent, "% đặt cọc", 0, 100), payment: validatePayment(s.payment) };
   const services = arr(d.services, "Gói chụp").map(x => ({ id: idOf(x.id, "gói"), name: req(x.name, "tên gói", 80), category: req(x.category, "danh mục", 40),
-    duration: int(x.duration, "Thời lượng (phút)", 15, 720), price: int(x.price, "Giá gói"), priceFull: x.priceFull ? int(x.priceFull, "Giá cả ngày") : 0, tone: tone(x.tone), desc: clean(x.desc || "", 300), includes: strList(x.includes || [], "Bao gồm", 8) }));
+    duration: int(x.duration, "Thời lượng (phút)", 15, 720), price: int(x.price, "Giá gói"), priceFull: x.priceFull ? int(x.priceFull, "Giá cả ngày") : 0, contact: !!x.contact, tone: tone(x.tone), desc: clean(x.desc || "", 300), includes: strList(x.includes || [], "Bao gồm", 8) }));
   uniqueIds(services, "gói"); if (!services.length) throw new Invalid("Cần ít nhất 1 gói chụp");
   const svcIds = new Set(services.map(x => x.id));
   const photographers = arr(d.photographers, "Thám tử").map(x => ({ id: idOf(x.id, "thám tử"), name: req(x.name, "tên thám tử", 60), role: clean(x.role || "", 60),
@@ -370,7 +370,7 @@ async function notifySubject() { const st = (await readJSON(FILES.site, {})).stu
 function notifyBooking(bk) {
   const lines = [
     `📸 ĐƠN ĐẶT LỊCH MỚI · ${bk.code}`,
-    `Khách: ${bk.customer.name} · ${bk.customer.phone}`,
+    `Khách: ${bk.customer.name} · ${bk.customer.phone}${bk.customer.instagram ? " · IG @" + bk.customer.instagram : ""}`,
     `Gói: ${bk.serviceName}`,
     `Ngày: ${dmy(bk.date)} · ${shiftVN(bk)}`,
     `Thám tử: ${bk.photographerName}${bk.staffName ? ` · Staff: ${bk.staffName}` : ""}`,
@@ -419,7 +419,7 @@ async function botReply(text, allowed, chatId) {
       const b = (await readJSON(FILES.bookings, [])).find(x => x.code.replace(/-/g, "") === q || x.code.replace(/-/g, "").endsWith(q));
       if (!b) return `Không tìm thấy đơn ${words[1]}.`;
       const paid = (b.payments || []).reduce((s, p) => s + p.amount, 0);
-      return [`📄 ${b.code} · ${STATUS_VN[b.status] || b.status}`, `Khách: ${b.customer.name} · ${b.customer.phone}${b.customer.email ? " · " + b.customer.email : ""}`,
+      return [`📄 ${b.code} · ${STATUS_VN[b.status] || b.status}`, `Khách: ${b.customer.name} · ${b.customer.phone}${b.customer.instagram ? " · IG @" + b.customer.instagram : ""}${b.customer.email ? " · " + b.customer.email : ""}`,
         `Ngày: ${dayTitle(b.date).slice(3)} · ${shiftVN(b)}`, `Gói: ${b.serviceName}`, `Thám tử: ${b.photographerName}${b.staffName ? " · Staff: " + b.staffName : ""}`,
         `Nơi chụp: ${b.zoneName} · ${b.address}`, ...(b.lines || []).map(([k, v]) => `  ${k}: ${vnd(v)}`), `Tổng: ${vnd(b.total)} · Cọc: ${vnd(b.deposit)}${paid ? ` · Đã nhận: ${vnd(paid)}` : ""}`,
         b.customer.note ? `Ghi chú khách: ${b.customer.note}` : "", b.adminNote ? `Ghi chú nội bộ: ${b.adminNote}` : ""].filter(Boolean).join("\n");
@@ -587,9 +587,10 @@ async function createBooking(b, res) {
     const site = await readJSON(FILES.site);
     const q = priceBooking(site, b);
     const c = b.customer || {};
-    const customer = { name: req2(c.name, "họ tên", 80), phone: clean(String(c.phone || ""), 20).replace(/[\s.-]/g, ""), email: clean(c.email || "", 120), note: clean(c.note || "", 1000) };
+    const customer = { name: req2(c.name, "họ tên", 80), phone: clean(String(c.phone || ""), 20).replace(/[\s.-]/g, ""), instagram: clean(String(c.instagram || ""), 120).replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/^@/, "").replace(/[/?#].*$/, ""), note: clean(c.note || "", 1000) };
     if (!/^(0|\+84)\d{9}$/.test(customer.phone)) throw new Invalid("Số điện thoại không hợp lệ");
-    if (customer.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email)) throw new Invalid("Email không hợp lệ");
+    if (!customer.instagram) throw new Invalid("Thiếu Instagram của khách");
+    if (!/^[A-Za-z0-9._]{1,30}$/.test(customer.instagram)) throw new Invalid("Instagram không hợp lệ");
     if (c.agree !== true) throw new Invalid("Chưa đồng ý điều khoản đặt cọc");
     const address = req2(b.address, "địa chỉ chụp", 200);
     // Kiểm tra trùng lịch với đơn thật & giao thám tử khi khách để team sắp xếp

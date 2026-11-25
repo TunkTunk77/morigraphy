@@ -179,6 +179,10 @@ main { min-height: 70vh; }
 .card-list li { padding-left: 24px; position: relative; }
 .card-list li::before { content: ""; position: absolute; left: 2px; top: .5em; width: 12px; height: 7px; border-left: 2px solid var(--accent); border-bottom: 2px solid var(--accent); transform: rotate(-45deg); }
 .card-foot { margin-top: auto; padding-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px dashed var(--line); }
+.card-acts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.card-contact { margin-top: 12px; }
+.card-contact .hint { margin: 0 0 8px; }
+.card-contact .chat-link { min-height: 38px; padding: 0 14px; font-size: .9rem; }
 .price { font: 600 20px var(--font-sans); }
 .price small { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 6px; }
 
@@ -363,6 +367,9 @@ main { min-height: 70vh; }
 .chat-sms { background: #2E7D4F; }
 @media (max-width: 480px) { .chat-link { flex: 1 1 calc(50% - 10px); } .deposit-status { flex-wrap: wrap; } .deposit-status .btn { width: 100%; } }
 .success-actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.invoice { width: 100%; max-width: 520px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.invoice-img { width: 100%; height: auto; border-radius: var(--radius-md); box-shadow: 0 10px 30px rgba(21,34,59,.14); }
+.invoice .sum-fine { margin: 0; }
 
 /* ---------- CTA / Contact / Footer ---------- */
 .cta-band { background: var(--ink); color: var(--bg); padding: 72px 0; }

@@ -57,10 +57,13 @@
 
   /* ---------------- State (lưu nháp trong trình duyệt) ---------------- */
   const DRAFT_KEY = "mg_draft_v1";
+  // Instagram khách: nhận "@ten", "ten" hoặc link instagram.com/ten → "ten"
+  const igHandle = v => String(v || "").trim().replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/^@/, "").replace(/[/?#].*$/, "");
+  const IG_RE = /^[A-Za-z0-9._]{1,30}$/;
   const blank = () => ({
     step: 1, serviceId: null, photographerId: "any", staffId: "any", zoneId: ZONES[0].id, nights: 0, address: "",
     date: null, time: "full", evening: false, calMonth: null, addons: {}, products: {},
-    customer: { name: "", phone: "", email: "", note: "", agree: false },
+    customer: { name: "", phone: "", instagram: "", note: "", agree: false },
   });
   let state = blank();
   try { const saved = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); if (saved && saved.step !== "done") state = Object.assign(blank(), saved); } catch (e) { /* bỏ qua */ }
@@ -71,6 +74,7 @@
   for (const id of Object.keys(state.addons)) if (!ADDONS.some(a => a.id === id)) delete state.addons[id];
   if (!state.photographerId || (state.photographerId !== "any" && !phById(state.photographerId))) state.photographerId = "any";
   delete state.people;
+  state.customer = Object.assign({ instagram: "" }, state.customer); delete state.customer.email;
   if (state.serviceId && !svcById(state.serviceId)) state.serviceId = null;
   if (!state.staffId || (state.staffId !== "any" && !stById(state.staffId))) state.staffId = "any";
   const save = () => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(state)); } catch (e) { /* bỏ qua */ } };
@@ -236,7 +240,8 @@
           <p class="card-desc">${s.desc}</p>
           <ul class="card-list">${(s.includes || []).map(i => `<li>${i}</li>`).join("")}</ul>
           <div class="card-foot"><span class="price">${s.priceFull > 0 ? `${money(s.price)}<small>nửa ngày · ${s.duration} phút</small><br />${money(s.priceFull)}<small>cả ngày</small>` : `${money(s.price)}<small>${s.duration} phút</small>`}</span>
-            <button type="button" class="btn btn-primary btn-sm" data-pick-service="${s.id}">Chọn gói</button></div>
+            <span class="card-acts">${s.contact ? `<button type="button" class="btn btn-ghost btn-sm" data-contact-service="${s.id}" aria-expanded="false">Liên hệ team</button>` : ""}<button type="button" class="btn btn-primary btn-sm" data-pick-service="${s.id}">Chọn gói</button></span></div>
+          ${s.contact ? `<div class="card-contact" hidden></div>` : ""}
         </div></article>`;
     }).join("");
     if (M.cardsIn) M.cardsIn($$("#servicesGrid [data-card]"));
@@ -387,7 +392,7 @@
 
       ${f("name", "Tên bạn", "text", c.name, "Nguyễn Văn A", 'autocomplete="name"')}
       ${f("phone", "Số điện thoại", "tel", c.phone, "0901 234 567", 'autocomplete="tel" inputmode="tel"', "Team gọi / nhắn Zalo số này để xác nhận.")}
-      ${f("email", "Email", "email", c.email, "ban@example.com", 'autocomplete="email"', "Không bắt buộc")}
+      ${f("instagram", "Instagram của bạn", "text", c.instagram, "@tenban", 'autocomplete="off" autocapitalize="off" spellcheck="false"', "Team nhắn Instagram này để gửi concept, ảnh mẫu.")}
 
       <div class="field" data-field="date"><span class="label">Ngày chụp</span><div id="calendar"></div><p class="hint" id="dateNote"></p><span class="err"></span></div>
 
@@ -439,7 +444,8 @@
     if (!state.photographerId) state.photographerId = "any";
     if (c.name.trim().length < 2) return fail("Nhập tên của bạn.", "name");
     if (!/^(0|\+84)\d{9}$/.test(c.phone.replace(/[\s.-]/g, ""))) return fail("Số điện thoại chưa đúng (10 số, bắt đầu bằng 0).", "phone");
-    if (c.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)) return fail("Email chưa đúng định dạng.", "email");
+    if (!c.instagram.trim()) return fail("Nhập Instagram của bạn.", "instagram");
+    if (!IG_RE.test(igHandle(c.instagram))) return fail("Instagram chưa đúng (chỉ chữ, số, dấu chấm, gạch dưới).", "instagram");
     if (!state.date) return fail("Chọn ngày chụp trên lịch.", "date");
     if (!state.time) return fail("Chọn chụp cả ngày hay nửa ngày (sáng / chiều).", "time");
     if (!slotOpen(state.date, state.time)) { state.time = null; renderSlots(); refreshSummary(); return fail("Buổi này không còn trống hoặc không đủ thời gian cho gói + dịch vụ thêm. Chọn buổi khác.", "time"); }
@@ -495,14 +501,77 @@
     return `MG-${String(d.getFullYear()).slice(2)}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${r}`;
   }
 
-  function gcalLink(code) {
-    const s = svcById(state.serviceId), z = zoneById(state.zoneId);
-    const sh = shiftById(state.time), start = toMin(sh.start), end = state.evening ? toMin(EV.end) : toMin(sh.end);
-    const ymd = state.date.replace(/-/g, "");
-    const fmt = m => `${ymd}T${pad(Math.floor(m / 60))}${pad(m % 60)}00`;
-    const params = new URLSearchParams({ action: "TEMPLATE", text: `Chụp ảnh ${S.name} · ${s.name}`, dates: `${fmt(start)}/${fmt(end)}`, ctz: "Asia/Ho_Chi_Minh",
-      details: `Mã hồ sơ: ${code}\nLiên hệ team ${S.name}: ${S.phone}`, location: state.address });
-    return "https://calendar.google.com/calendar/render?" + params.toString();
+  /* ---------------- Hoá đơn hồ sơ (ảnh PNG vẽ bằng canvas, khách tải về máy) ---------------- */
+  let lastInvoice = null;
+  async function drawInvoice(b, q, paid) {
+    try { await Promise.race([Promise.all(['800 40px "Baloo 2"', '700 20px "Nunito"', '400 20px "Nunito"'].map(f => document.fonts.load(f))), new Promise(r => setTimeout(r, 1500))]); } catch (e) { /* dùng font hệ thống */ }
+    const W = 1080, P = 84, INK = "#15223B", RED = "#B8302A", MUTED = "#6B6A63", PAPER = "#FBF6EA", LINE = "#D9CFB8";
+    const SERIF = '"Baloo 2", "Nunito", sans-serif', SANS = '"Nunito", system-ui, sans-serif';
+    const s = svcById(b.serviceId) || {}, z = zoneById(b.zoneId) || {};
+    const cv = document.createElement("canvas"), x = cv.getContext("2d");
+    const wrap = (text, font, max) => { x.font = font; const out = []; let line = "";
+      for (const w of String(text).split(/\s+/)) { const t = line ? line + " " + w : w; if (x.measureText(t).width > max && line) { out.push(line); line = w; } else line = t; }
+      if (line) out.push(line); return out.length ? out : [""]; };
+    const info = [
+      ["Khách hàng", b.customer.name], ["Điện thoại", b.customer.phone], b.customer.instagram ? ["Instagram", "@" + igHandle(b.customer.instagram)] : null,
+      ["Gói chụp", s.name || ""], ["Thám tử", b.photographerName || "Team sắp xếp"], b.staffName ? ["Staff take care", b.staffName] : null,
+      ["Ngày chụp", `${dateLabel(b.date)} · ${shiftText(b.time)}${b.evening ? ` + tối đến ${EV.end}` : ""}`],
+      ["Địa điểm", `${z.short || ""} · ${b.address}`],
+    ].filter(Boolean);
+    const LBL = 250, VAL = W - 2 * P - LBL, VFONT = `700 30px ${SANS}`, IFONT = `600 28px ${SANS}`;
+    const plan = []; let y = 0;
+    const add = (h, fn) => { plan.push([y, fn]); y += h; };
+    // Đầu hoá đơn
+    add(270, y0 => {
+      x.fillStyle = RED; x.font = `700 24px ${SANS}`; x.fillText("HỒ SƠ ĐẶT LỊCH CHỤP · HOÁ ĐƠN", P, y0 + 70);
+      x.fillStyle = INK; x.font = `800 72px ${SERIF}`; x.fillText(S.name, P, y0 + 148);
+      x.fillStyle = MUTED; x.font = `600 26px ${SANS}`; const d = new Date();
+      x.fillText(`Mã hồ sơ ${b.code} · lập ngày ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`, P, y0 + 222);
+    });
+    const dash = () => add(44, y0 => { x.strokeStyle = LINE; x.lineWidth = 3; x.setLineDash([14, 10]); x.beginPath(); x.moveTo(P, y0 + 22); x.lineTo(W - P, y0 + 22); x.stroke(); x.setLineDash([]); });
+    dash();
+    for (const [k, v] of info) { const lines = wrap(v, VFONT, VAL);
+      add(18 + lines.length * 42, y0 => { x.fillStyle = MUTED; x.font = `600 26px ${SANS}`; x.fillText(k, P, y0 + 40);
+        x.fillStyle = INK; x.font = VFONT; lines.forEach((l, i) => x.fillText(l, P + LBL, y0 + 40 + i * 42)); }); }
+    add(20, () => {}); dash();
+    add(60, y0 => { x.fillStyle = RED; x.font = `700 24px ${SANS}`; x.fillText("CHI TIẾT", P, y0 + 40); });
+    for (const [k, v] of q.rows) { const lines = wrap(k, IFONT, W - 2 * P - 230);
+      add(12 + lines.length * 40, y0 => { x.fillStyle = INK; x.font = IFONT; lines.forEach((l, i) => x.fillText(l, P, y0 + 38 + i * 40));
+        x.textAlign = "right"; x.font = `700 28px ${SANS}`; x.fillText(money(v), W - P, y0 + 38); x.textAlign = "left"; }); }
+    add(20, () => {}); dash();
+    const sumRow = (k, v, color, big) => add(big ? 70 : 54, y0 => { x.fillStyle = color; x.font = `${big ? 800 : 700} ${big ? 44 : 30}px ${big ? SERIF : SANS}`;
+      x.fillText(k, P, y0 + (big ? 52 : 40)); x.textAlign = "right"; x.fillText(v, W - P, y0 + (big ? 52 : 40)); x.textAlign = "left"; });
+    sumRow("Tổng tạm tính", money(q.total) + (q.needsQuote ? "*" : ""), INK, true);
+    sumRow(`Đặt cọc ${S.depositPercent}%`, money(q.deposit), RED);
+    sumRow("Còn lại thanh toán ngày chụp", money(Math.max(0, q.total - (paid || q.deposit))), MUTED);
+    if (q.needsQuote) add(44, y0 => { x.fillStyle = MUTED; x.font = `italic 600 22px ${SANS}`; x.fillText("* Phí đi lại báo giá riêng theo vé thực tế.", P, y0 + 30); });
+    add(30, () => {}); dash();
+    const foot = [S.phone ? `Liên hệ team: ${S.phone} (Zalo)` : "", "Cảm ơn bạn đã gửi hồ sơ cho văn phòng thám tử ảnh!"].filter(Boolean);
+    add(30 + foot.length * 40, y0 => { x.fillStyle = MUTED; x.font = `600 26px ${SANS}`; x.textAlign = "center"; foot.forEach((l, i) => x.fillText(l, W / 2, y0 + 44 + i * 40)); x.textAlign = "left"; });
+    const H = y + 60;
+    cv.width = W; cv.height = H + 40;
+    // Giấy hồ sơ: nền kem, tab kẹp hồ sơ, viền
+    x.fillStyle = "#E9DFC6"; x.fillRect(0, 0, W, H + 40);
+    x.fillStyle = "#D8C79F"; x.beginPath(); x.roundRect(P - 20, 14, 330, 60, 14); x.fill();
+    x.fillStyle = INK; x.font = `700 22px ${SANS}`; x.fillText("HỒ SƠ #" + b.code, P + 2, 52);
+    x.fillStyle = PAPER; x.beginPath(); x.roundRect(28, 56, W - 56, H - 30, 22); x.fill();
+    x.strokeStyle = LINE; x.lineWidth = 2; x.stroke();
+    x.save(); x.translate(0, 40); for (const [y0, fn] of plan) fn(y0); x.restore();
+    // Con dấu đỏ
+    x.save(); x.translate(W - P - 150, 40 + 112); x.rotate(-0.18); x.globalAlpha = .85;
+    x.strokeStyle = RED; x.lineWidth = 6; x.beginPath(); x.roundRect(-150, -58, 300, 116, 12); x.stroke();
+    x.lineWidth = 2; x.beginPath(); x.roundRect(-138, -46, 276, 92, 8); x.stroke();
+    x.fillStyle = RED; x.textAlign = "center"; x.font = `800 40px ${SERIF}`; x.fillText(paid ? "ĐÃ CỌC" : "ĐÃ MỞ HỒ SƠ", 0, 8);
+    x.font = `700 18px ${SANS}`; x.fillText(paid ? `${money(paid)} · giữ lịch` : "CHỜ ĐẶT CỌC", 0, 34); x.restore();
+    return cv;
+  }
+  async function renderInvoice(paid) {
+    const box = document.getElementById("invoiceBox"); if (!box || !lastInvoice) return;
+    const { b, q } = lastInvoice, cv = await drawInvoice(b, q, paid);
+    const url = cv.toDataURL("image/png"), name = `${S.name}-hoa-don-${b.code}.png`;
+    box.innerHTML = `<img class="invoice-img" src="${url}" alt="Hoá đơn hồ sơ ${esc(b.code)}: ${esc(b.customer.name)}, tổng ${money(q.total)}, đặt cọc ${money(q.deposit)}" />
+      <a class="btn btn-primary" href="${url}" download="${esc(name)}" id="btnInvoice">Tải hoá đơn về máy</a>
+      <p class="sum-fine">Trên điện thoại cũng có thể nhấn giữ vào ảnh rồi chọn “Lưu ảnh”.</p>`;
   }
 
   async function submit() {
@@ -557,8 +626,6 @@
 
   async function showSuccess(b, q, ph) {
     if (M.stepOut) await M.stepOut(view);
-    const s = svcById(b.serviceId), z = zoneById(b.zoneId);
-    const row = (k, v, strong) => `<div class="sum-row"><span>${k}</span><span${strong ? ' style="font-weight:600"' : ""}>${v}</span></div>`;
     const pay = payBlock(b, q);
     view.innerHTML = `<div class="success">
       <svg class="success-icon" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="40"/><path d="M26 41l9 9 19-20"/></svg>
@@ -567,23 +634,17 @@
         ? "Quét mã bên dưới để đặt cọc giữ lịch. Team đối soát và gọi xác nhận trong vòng 2 giờ làm việc."
         : "Team sẽ gọi xác nhận trong vòng 2 giờ làm việc và gửi thông tin đặt cọc qua Zalo/SMS."}</p>
       <span class="case-code">Mã hồ sơ: ${b.code}</span>
-      <div class="sum-box">
-        ${row("Gói chụp", s.name)}${row("Thám tử", b.photographerName || (ph ? ph.name : "Team sắp xếp"))}${b.staffName ? row("Staff take care", esc(b.staffName)) : ""}
-        ${row("Địa điểm", `${z.short} · ${esc(b.address)}`)}
-        ${row("Lịch chụp", `${dateLabel(b.date)} · ${shiftText(b.time)}${b.evening ? ` + tối đến ${EV.end}` : ""}`)}
-        ${row("Người đặt", `${esc(b.customer.name)} · ${esc(b.customer.phone)}`)}
-        ${row("Tổng tạm tính", money(q.total) + (q.needsQuote ? "*" : ""), true)}${row("Cần đặt cọc", `<span style="color:var(--accent)">${money(q.deposit)}</span>`, true)}
-      </div>
+      <div class="invoice" id="invoiceBox" aria-live="polite"><p class="sum-fine">Đang lập hoá đơn…</p></div>
       ${pay}
       ${pay && b.viewToken ? `<div class="deposit-status" id="depositStatus" role="status" aria-live="polite">
         <span class="dot-wait" aria-hidden="true"></span><div><b>Đang chờ tiền cọc…</b><small>Chuyển khoản xong, trang này tự cập nhật trong vài giây.</small></div>
         <button type="button" class="btn btn-ghost btn-sm" id="btnCheckPaid">Tôi đã chuyển khoản</button></div>` : ""}
       <div id="chatBox"></div>
       <div class="success-actions">
-        <a class="btn btn-primary" href="${gcalLink(b.code)}" target="_blank" rel="noopener">Thêm vào Google Calendar</a>
         <button type="button" class="btn btn-ghost" id="btnNew">Đặt lịch mới</button>
       </div></div>`;
     state.step = "done"; $("#stepNav").hidden = true;
+    lastInvoice = { b, q }; renderInvoice();
     try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* bỏ qua */ }
     if (M.successIn) M.successIn(view); else if (M.stepIn) M.stepIn(view);
     $(".success h3").focus({ preventScroll: true });
@@ -617,6 +678,7 @@
     const st = document.getElementById("depositStatus");
     if (st) { st.classList.add("is-paid"); st.innerHTML = `<span class="dot-ok" aria-hidden="true">✓</span><div><b>Đã nhận cọc ${money(s.paid || s.deposit || 0)}</b><small>Lịch của bạn đã được giữ. Mã hồ sơ ${esc(b.code)}.</small></div>`; }
     const pb = view.querySelector(".pay-box"); if (pb) pb.hidden = true;
+    renderInvoice(s.paid || s.deposit || (lastInvoice && lastInvoice.q.deposit)); // hoá đơn đổi dấu thành "ĐÃ CỌC"
     const box = document.getElementById("chatBox"); if (box) { box.innerHTML = chatBlock(b, s.contact); if (M.stepIn) M.stepIn(box); }
   }
   // Kênh chat với team: Zalo (theo SĐT), Messenger, Instagram, gọi điện
@@ -761,6 +823,13 @@
   document.addEventListener("click", e => {
     const t = e.target.closest("button, a"); if (!t) return;
     if (t.matches("[data-cat]")) { activeCat = t.dataset.cat; renderServices(); return; }
+    if (t.matches("[data-contact-service]")) { // mở / đóng các kênh chat với team ngay trong thẻ gói
+      const s = svcById(t.dataset.contactService), box = t.closest(".card-body").querySelector(".card-contact"); if (!s || !box) return;
+      const open = box.hidden; box.hidden = !open; t.setAttribute("aria-expanded", String(open));
+      if (open) { smsText = `Chào ${S.name}, mình muốn hỏi về gói “${s.name}”.`;
+        box.innerHTML = `<p class="hint">Nhắn team để hỏi thêm về gói này:</p><div class="chat-links">${chatLinks().map(([l, h, k]) => `<a class="chat-link chat-${k}" href="${esc(h)}" ${k === "call" || k === "sms" ? "" : 'target="_blank" rel="noopener"'}>${esc(l)}</a>`).join("")}</div>`; }
+      return;
+    }
     if (t.matches("[data-pick-service]")) {
       setService(t.dataset.pickService);
       showForm({ scroll: true });
@@ -849,7 +918,7 @@
   view.addEventListener("input", e => {
     const el = e.target;
     if (el.name === "address") { state.address = el.value; refreshSummary(); }
-    else if (["name", "phone", "email", "note"].includes(el.name)) { state.customer[el.name] = el.value; save(); }
+    else if (["name", "phone", "instagram", "note"].includes(el.name)) { state.customer[el.name] = el.value; save(); }
   });
   view.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); btnNext.click(); } });
 
