@@ -71,10 +71,10 @@
   if (state.time && !shiftById(state.time)) state.time = null; // bản nháp cũ còn giờ kiểu "09:00"
   if (!ZONES.some(z => z.id === state.zoneId)) state.zoneId = ZONES[0].id;
   state.products = {}; // mục Sản phẩm đã bỏ — xóa lựa chọn cũ trong bản nháp
-  for (const id of Object.keys(state.addons)) if (!ADDONS.some(a => a.id === id)) delete state.addons[id];
   if (!state.photographerId || (state.photographerId !== "any" && !phById(state.photographerId))) state.photographerId = "any";
+  state.addons = {}; // form đã bỏ phần dịch vụ đi kèm — xóa lựa chọn cũ trong bản nháp
   delete state.people;
-  state.customer = Object.assign({ instagram: "" }, state.customer); delete state.customer.email;
+  state.customer = Object.assign({ instagram: "" }, state.customer); delete state.customer.email; state.customer.note = ""; // form đã bỏ ô concept
   if (state.serviceId && !svcById(state.serviceId)) state.serviceId = null;
   if (!state.staffId || (state.staffId !== "any" && !stById(state.staffId))) state.staffId = "any";
   const save = () => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(state)); } catch (e) { /* bỏ qua */ } };
@@ -91,8 +91,15 @@
   const shiftKey = (k, n) => keyOf(addDays(fromKey(k), n));
   const totalMinutes = () => {
     const s = svcById(state.serviceId); if (!s) return 60;
-    return s.duration + ADDONS.reduce((m, a) => m + (a.extraMinutes || 0) * (state.addons[a.id] || 0), 0);
+    return curAddons().reduce((m, a) => m + (a.extraMinutes || 0) * (state.addons[a.id] || 0), 0);
   };
+  // Dịch vụ đi kèm theo từng thám tử: chỉ có khi khách chọn đích danh thám tử
+  function phAddons(p) { return p ? p.addons || ADDONS || [] : []; }
+  function curAddons() { return phAddons(state.photographerId && state.photographerId !== "any" ? phById(state.photographerId) : null); }
+  function setPhotographer(id) { // đổi thám tử → bỏ dịch vụ đi kèm của người cũ
+    if (id !== state.photographerId && Object.keys(state.addons).length) { state.addons = {}; toast("Dịch vụ đi kèm tùy từng thám tử — đã bỏ các món đã chọn, chọn lại nhé."); }
+    state.photographerId = id;
+  }
   const eligible = () => { const s = svcById(state.serviceId); return s ? PHOTOGRAPHERS.filter(p => p.services.includes(s.id)) : PHOTOGRAPHERS; };
   function candidates(dateKey) {
     const dow = fromKey(dateKey).getDay();
@@ -159,7 +166,7 @@
     if (state.evening && EV.price > 0) { rows.push([`Chụp thêm buổi tối đến ${EV.end}`, EV.price]); total += EV.price; }
     if (z.fee) { rows.push([`Phí di chuyển · ${z.short}${z.feeMax > z.fee ? " (mức thấp)" : ""}`, z.fee]); total += z.fee; }
     if (z.perNight && state.nights) { const v = z.perNight * state.nights; rows.push([`Lưu trú ekip × ${state.nights} đêm`, v]); total += v; }
-    for (const a of ADDONS) { const q = state.addons[a.id] || 0; if (q) { rows.push([`${a.name} × ${q}`, a.price * q]); total += a.price * q; } }
+    for (const a of curAddons()) { const q = state.addons[a.id] || 0; if (q) { rows.push([`${a.name} × ${q}`, a.price * q]); total += a.price * q; } }
     for (const pr of PRODUCTS) { const q = state.products[pr.id] || 0; if (q) { rows.push([`${pr.name} × ${q}`, pr.price * q]); total += pr.price * q; } }
     const deposit = Math.round(total * S.depositPercent / 100 / 1000) * 1000;
     return { rows, total, deposit, needsQuote: !!z.quote };
@@ -239,7 +246,7 @@
           <h3>${s.name}</h3>
           <p class="card-desc">${s.desc}</p>
           <ul class="card-list">${(s.includes || []).map(i => `<li>${i}</li>`).join("")}</ul>
-          <div class="card-foot"><span class="price">${s.priceFull > 0 ? `${money(s.price)}<small>nửa ngày · ${s.duration} phút</small><br />${money(s.priceFull)}<small>cả ngày</small>` : `${money(s.price)}<small>${s.duration} phút</small>`}</span>
+          <div class="card-foot"><span class="price">${s.priceFull > 0 ? `${money(s.price)}<small>nửa ngày</small><br />${money(s.priceFull)}<small>cả ngày</small>` : money(s.price)}</span>
             <span class="card-acts">${s.contact ? `<button type="button" class="btn btn-ghost btn-sm" data-contact-service="${s.id}" aria-expanded="false">Liên hệ team</button>` : ""}<button type="button" class="btn btn-primary btn-sm" data-pick-service="${s.id}">Chọn gói</button></span></div>
           ${s.contact ? `<div class="card-contact" hidden></div>` : ""}
         </div></article>`;
@@ -275,8 +282,17 @@
       <div class="item-body"><span class="item-type">${type}</span><span class="item-name">${it.name}</span><span class="item-desc">${it.desc}</span>
         <div class="item-foot"><span class="item-price">${money(it.price)} / ${it.unit}</span>${control}</div></div></div>`;
   }
+  // Trang chủ: dịch vụ đi kèm gom theo từng thám tử. Bấm thêm = chọn luôn thám tử đó.
   function renderExtras() {
-    $("#addonsGrid").innerHTML = ADDONS.map(a => itemHTML("addon", a)).join("");
+    const groups = PHOTOGRAPHERS.map(p => [p, phAddons(p)]).filter(([, l]) => l.length);
+    const grid = $("#addonsGrid"); if (!grid) return; // trang chủ đã bỏ mục này (dịch vụ đi kèm nằm trong form, theo thám tử)
+    grid.innerHTML = groups.map(([p, list]) => list.map(a => {
+      const mine = state.photographerId === p.id, q = mine ? state.addons[a.id] || 0 : 0;
+      const control = q ? qtyHTML("addon", a.id, q, a.max) : `<button type="button" class="btn btn-ghost btn-sm" data-ph-addon="${p.id}:${a.id}">+ Thêm vào hồ sơ</button>`;
+      return `<div class="item${q ? " is-selected" : ""}">
+      <div class="thumb ph ph-${a.tone}"></div>
+      <div class="item-body"><span class="item-type">Thám tử ${esc(p.name)}</span><span class="item-name">${esc(a.name)}</span><span class="item-desc">${esc(a.desc)}</span>
+        <div class="item-foot"><span class="item-price">${money(a.price)} / ${esc(a.unit)}</span>${control}</div></div></div>`; }).join("")).join("");
   }
 
   /* Chụp ngoài tỉnh: chọn nơi chụp + số thám tử → xem phụ phí; bảng đầy đủ gập lại bên dưới */
@@ -360,7 +376,9 @@
   function renderSlots() { renderShift(); renderEvening(); renderDateNote(); }
   function renderAddons() {
     const box = $("#addonBox"); if (!box) return;
-    box.innerHTML = ADDONS.map(a => { const q = state.addons[a.id] || 0;
+    const list = curAddons();
+    if (!list.length) { box.innerHTML = `<p class="hint" style="margin:0">${state.photographerId && state.photographerId !== "any" ? "Thám tử này chưa có dịch vụ đi kèm." : "Mỗi thám tử có đồ riêng — chọn thám tử ở trên để xem dịch vụ đi kèm."}</p>`; return; }
+    box.innerHTML = list.map(a => { const q = state.addons[a.id] || 0;
       return `<div class="bk-addon${q ? " is-on" : ""}"><span><b>${esc(a.name)}</b><small>${money(a.price)} / ${esc(a.unit)}</small></span>${qtyHTML("addon", a.id, q, a.max)}</div>`; }).join("");
   }
 
@@ -374,7 +392,7 @@
       <div class="field" data-field="service"><label for="f_service">Gói chụp</label>
         <select id="f_service" name="service"><option value="" ${s ? "" : "selected"} disabled>Chọn gói chụp…</option>
           ${SERVICES.map(x => `<option value="${x.id}" ${x.id === state.serviceId ? "selected" : ""}>${esc(x.name)} · ${priceText(x)}</option>`).join("")}</select>
-        ${s ? `<span class="hint">${esc(s.category)} · ${s.duration} phút${(s.includes || []).length ? " · " + esc(s.includes.slice(0, 2).join(", ")) : ""}</span>` : ""}<span class="err"></span></div>
+        ${s ? `<span class="hint">${esc(s.category)}${(s.includes || []).length ? " · " + esc(s.includes.slice(0, 2).join(", ")) : ""}</span>` : ""}<span class="err"></span></div>
 
       <div class="field" data-field="photographer"><label for="f_photographer">Thám tử muốn chụp</label>
         <div class="bk-pick"><span class="opt-avatar ph-${pickPh ? pickPh.tone : "stone"}" aria-hidden="true">${pickPh ? avatar(pickPh) : "?"}</span>
@@ -405,9 +423,7 @@
 
       <div id="eveningBox"></div>
 
-      ${ADDONS.length ? `<div class="field"><span class="label">Dịch vụ thêm <small>(không bắt buộc)</small></span><div class="bk-addons" id="addonBox"></div></div>` : ""}
 
-      <div class="field"><label for="f_note">Concept mong muốn</label><textarea id="f_note" name="note" placeholder="VD: tone pastel, chụp ở sân trường lúc chiều">${esc(c.note)}</textarea></div>
 
       <label class="check" data-field="agree"><input type="checkbox" name="agree" ${c.agree ? "checked" : ""} />
         <span>Tôi đồng ý đặt cọc ${S.depositPercent}% để giữ lịch${(S.payment && S.payment.enabled) || PHOTOGRAPHERS.some(x => x.hasOwnPayment) ? " (chuyển khoản qua mã QR sau khi gửi)" : ""}. Cọc được hoàn nếu báo dời/hủy trước 72 giờ.<span class="err" style="display:block"></span></span></label>
@@ -723,7 +739,7 @@
   }
   function changeQty(kind, id, delta) {
     const bag = kind === "addon" ? state.addons : state.products;
-    const it = (kind === "addon" ? ADDONS : PRODUCTS).find(x => x.id === id);
+    const it = (kind === "addon" ? curAddons() : PRODUCTS).find(x => x.id === id); if (!it) return 0;
     const next = Math.max(0, Math.min(it.max || 10, (bag[id] || 0) + delta));
     if (next) bag[id] = next; else delete bag[id];
     renderExtras(); renderAddons(); if (state.date && state.time && !slotOpen(state.date, state.time)) { renderSlots(); toast("Thêm giờ làm buổi chụp dài hơn buổi đã chọn, chọn “Cả ngày” nhé."); }
@@ -797,8 +813,9 @@
           <p class="rating" style="margin-top:6px">${STAR}${p.rating} <span class="team-meta">· ${p.reviews} đánh giá · ${p.surcharge ? "Phụ phí chọn đích danh +" + money(p.surcharge) : "Không phụ phí"}</span></p></div>
         <div class="profile-block"><h4>Phong cách</h4><p>${p.style} ${p.bio}</p></div>
         <div class="profile-block"><h4>Chuyên môn</h4><div class="tags">${p.specialties.map(t => `<span class="tag">${t}</span>`).join("")}</div></div>
+        ${phAddons(p).length ? `<div class="profile-block"><h4>Dịch vụ đi kèm</h4><div class="tags">${phAddons(p).map(a => `<span class="tag"${a.desc ? ` title="${esc(a.desc)}"` : ""}>${esc(a.name)}</span>`).join("")}</div></div>` : ""}
         <div class="profile-block"><h4>Lịch làm việc</h4><div class="days">${dayOrder.map(d => `<span class="day-pill${p.workDays.includes(d) ? "" : " off"}" title="${DOW[d]}">${d ? "T" + (d + 1) : "CN"}</span>`).join("")}</div></div>
-        <div class="profile-block"><h4>Nhận chụp các gói</h4><p>${p.services.map(svcById).filter(Boolean).map(s => s.name).join(" · ") || "—"}</p></div>
+        <div class="profile-block"><h4>Nhận chụp các gói</h4>${p.services.map(svcById).filter(Boolean).length ? `<div class="tags">${p.services.map(svcById).filter(Boolean).map(s => `<span class="tag">${esc(s.name)}</span>`).join("")}</div>` : "<p>—</p>"}</div>
         <div class="profile-block"><h4>Portfolio${(p.portfolio || []).length ? ` · ${p.portfolio.length} ảnh` : ""}</h4>${portfolioHTML(p)}</div>
         <div class="profile-actions"><button type="button" class="btn btn-primary" data-book-with="${p.id}">Đặt lịch với ${p.name.split(" ").pop()} →</button>
           <button type="button" class="btn btn-ghost" data-close>Đóng</button></div>
@@ -845,7 +862,7 @@
     if (t.matches("[data-lightbox]")) { const [pid, j] = t.dataset.lightbox.split(":"); openLightbox(pid, Number(j), t); return; }
     if (t.matches("[data-close]")) { closeModal(); return; }
     if (t.matches("[data-book-with]")) {
-      const p = phById(t.dataset.bookWith); state.photographerId = p.id;
+      const p = phById(t.dataset.bookWith); setPhotographer(p.id);
       if (state.serviceId && !p.services.includes(state.serviceId)) state.serviceId = null;
       if (state.time && state.date && state.serviceId && !slotOpen(state.date, state.time)) state.time = null;
       closeModal(); showForm({ scroll: true });
@@ -853,10 +870,18 @@
       return;
     }
     if (t.matches("[data-qty]")) {
-      const [kind, id, d] = t.dataset.qty.split(":"); const it = (kind === "addon" ? ADDONS : PRODUCTS).find(x => x.id === id);
+      const [kind, id, d] = t.dataset.qty.split(":"); const it = (kind === "addon" ? curAddons() : PRODUCTS).find(x => x.id === id); if (!it) return;
       const q = changeQty(kind, id, Number(d));
       if (!view.contains(t)) toast(q ? `${it.name}: ${q} ${it.unit} trong hồ sơ` : `Đã bỏ ${it.name}`);
       return;
+    }
+    if (t.matches("[data-ph-addon]")) { // trang chủ: thêm dịch vụ của 1 thám tử → chọn thám tử đó
+      const [pid, id] = t.dataset.phAddon.split(":"), p = phById(pid), it = phAddons(p).find(x => x.id === id); if (!it) return;
+      setPhotographer(pid);
+      if (state.serviceId && !p.services.includes(state.serviceId)) { state.serviceId = null; toast(`${p.name} không nhận gói đã chọn — chọn lại gói nhé.`); }
+      if (state.date && !dayOpen(fromKey(state.date))) state.date = null;
+      if (state.time && state.date && !slotOpen(state.date, state.time)) state.time = null;
+      changeQty("addon", id, 1); showForm(); toast(`Đã thêm ${it.name} · thám tử ${p.name}`); return;
     }
     if (t.matches("[data-pick-zone]")) {
       const z = zoneById(t.dataset.pickZone); state.zoneId = z.id; if (!z.perNight || z.quote) state.nights = 0;
@@ -902,7 +927,7 @@
     const el = e.target;
     if (el.name === "service") { setService(el.value); if (!shiftFits("morning") && isHalf()) state.time = "full"; rerender("f_service"); errEl.textContent = ""; }
     else if (el.name === "staff") { state.staffId = el.value; if (state.time && state.date && !slotOpen(state.date, state.time)) { state.time = null; toast("Staff này đã có lịch vào buổi đã chọn, chọn lại buổi nhé."); } renderCalendar(); renderSlots(); refreshSummary(); errEl.textContent = ""; }
-    else if (el.name === "photographer") { state.photographerId = el.value; if (state.date && !dayOpen(fromKey(state.date))) { state.date = null; toast("Thám tử này không trống ngày đã chọn, chọn lại ngày nhé."); } if (state.time && state.date && !slotOpen(state.date, state.time)) state.time = null; rerender("f_photographer"); errEl.textContent = ""; }
+    else if (el.name === "photographer") { setPhotographer(el.value); if (state.date && !dayOpen(fromKey(state.date))) { state.date = null; toast("Thám tử này không trống ngày đã chọn, chọn lại ngày nhé."); } if (state.time && state.date && !slotOpen(state.date, state.time)) state.time = null; rerender("f_photographer"); errEl.textContent = ""; }
     else if (el.name === "evening") { state.evening = el.checked && eveningOk(); refreshSummary(); }
     else if (el.name === "zone") { const z = zoneById(el.value); state.zoneId = z.id; if (!z.perNight || z.quote) state.nights = 0;
       if (state.date && fromKey(state.date) < earliestDay()) { state.date = null; state.time = null; toast(`${z.short} cần đặt trước ít nhất ${z.leadDays} ngày — chọn lại ngày nhé.`); }
@@ -942,8 +967,8 @@
   /* ---------------- Mỗi mục menu là một trang riêng ----------------
      Trang chủ = ảnh bìa + dải kêu gọi; các trang khác chỉ hiện đúng phần đó.
      Địa chỉ vẫn là #services, #team… nên nút quay lại của trình duyệt dùng được. */
-  const PAGES = ["services", "team", "extras", "travel", "booking", "contact"];
-  const CTA_ON = ["home", "services", "team", "extras", "travel"];
+  const PAGES = ["services", "team", "travel", "booking", "contact"];
+  const CTA_ON = ["home", "services", "team", "travel"];
   const pageOf = () => { const id = decodeURIComponent(location.hash.slice(1)); return PAGES.includes(id) ? id : "home"; };
   let curPage = null;
   function route() {

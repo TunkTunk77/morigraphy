@@ -35,7 +35,7 @@
     contact: { eyebrow: "Liên hệ", title: "Gọi cho đội thám tử",
       sub: "{team} là team nhiếp ảnh di động, không có studio cố định. Chúng tôi đến chụp tại địa điểm bạn chọn: nhà riêng, quán cà phê, công viên, văn phòng, trường học…" },
   };
-  window.SECTION_LABELS = { services: "Gói chụp", team: "Thám tử ảnh", extras: "Dịch vụ đi kèm", travel: "Chụp ngoài tỉnh", booking: "Đặt lịch", cta: "Dải kêu gọi cuối trang", contact: "Liên hệ" };
+  window.SECTION_LABELS = { services: "Gói chụp", team: "Thám tử ảnh", travel: "Chụp ngoài tỉnh", booking: "Đặt lịch", cta: "Dải kêu gọi cuối trang", contact: "Liên hệ" };
 
   /** Gộp dữ liệu đã lưu với mặc định (trường trống/thiếu → mặc định) */
   window.mergeSections = function (s) {

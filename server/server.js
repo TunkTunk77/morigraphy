@@ -172,7 +172,7 @@ function validateSite(d) {
     area: clean(s.area || "", 200), openHours: clean(s.openHours || "", 120), facebook: url(s.facebook, "Facebook"), instagram: url(s.instagram, "Instagram"),
     depositPercent: int(s.depositPercent, "% đặt cọc", 0, 100), payment: validatePayment(s.payment) };
   const services = arr(d.services, "Gói chụp").map(x => ({ id: idOf(x.id, "gói"), name: req(x.name, "tên gói", 80), category: req(x.category, "danh mục", 40),
-    duration: int(x.duration, "Thời lượng (phút)", 15, 720), price: int(x.price, "Giá gói"), priceFull: x.priceFull ? int(x.priceFull, "Giá cả ngày") : 0, contact: !!x.contact, tone: tone(x.tone), desc: clean(x.desc || "", 300), includes: strList(x.includes || [], "Bao gồm", 8) }));
+    price: int(x.price, "Giá gói"), priceFull: x.priceFull ? int(x.priceFull, "Giá cả ngày") : 0, contact: !!x.contact, tone: tone(x.tone), desc: clean(x.desc || "", 300), includes: strList(x.includes || [], "Bao gồm", 8) }));
   uniqueIds(services, "gói"); if (!services.length) throw new Invalid("Cần ít nhất 1 gói chụp");
   const svcIds = new Set(services.map(x => x.id));
   const photographers = arr(d.photographers, "Thám tử").map(x => ({ id: idOf(x.id, "thám tử"), name: req(x.name, "tên thám tử", 60), role: clean(x.role || "", 60),
@@ -191,10 +191,14 @@ function validateSite(d) {
   uniqueIds([...photographers, ...staff], "thám tử / staff");
   const item = (x, kind) => ({ id: idOf(x.id, kind), name: req(x.name, "tên " + kind, 80), price: int(x.price, "Giá " + kind), unit: req(x.unit || "cái", "đơn vị", 20),
     tone: tone(x.tone), desc: clean(x.desc || "", 200), max: x.max ? int(x.max, "Tối đa", 1, 100) : undefined });
-  const addons = arr(d.addons, "Dịch vụ").map(x => ({ ...item(x, "dịch vụ"), extraMinutes: x.extraMinutes ? int(x.extraMinutes, "Thêm phút", 0, 480) : undefined }));
+  const addonOf = x => ({ ...item(x, "dịch vụ"), extraMinutes: x.extraMinutes ? int(x.extraMinutes, "Thêm phút", 0, 480) : undefined });
+  // Dịch vụ đi kèm theo từng thám tử (mỗi người có đồ riêng). Dữ liệu cũ chưa có thì chép danh sách chung cũ sang.
+  photographers.forEach((p, i) => { const raw = d.photographers[i].addons;
+    p.addons = arr(raw === undefined ? (d.addons || []) : raw, "Dịch vụ đi kèm của " + p.name, 50).map(addonOf); uniqueIds(p.addons, "dịch vụ của " + p.name); });
+  const addons = [];
   /* Mục Sản phẩm đã bỏ khỏi web/admin; vẫn đọc được dữ liệu cũ */
   const products = arr(d.products || [], "Sản phẩm").map(x => ({ ...item(x, "sản phẩm"), type: req(x.type || "Khác", "loại", 30) }));
-  uniqueIds(addons, "dịch vụ"); uniqueIds(products, "sản phẩm");
+  uniqueIds(products, "sản phẩm");
   const zones = arr(d.zones, "Vùng", 80).map(x => ({ id: idOf(x.id, "vùng"), name: req(x.name, "tên vùng", 80), short: req(x.short, "tên ngắn", 30), fee: int(x.fee || 0, "Phí vùng"),
     feeMax: int(x.feeMax || 0, "Phí tối đa") > int(x.fee || 0, "Phí vùng") ? int(x.feeMax, "Phí tối đa") : 0, // giá khoảng: đơn tính mức thấp (fee), hiển thị fee – feeMax
     perNight: int(x.perNight || 0, "Phí lưu trú"), leadDays: int(x.leadDays || 0, "Số ngày đặt trước", 0, 90), quote: !!x.quote, fullDay: !!x.fullDay,
@@ -212,6 +216,8 @@ function validateSite(d) {
    site.shifts = { morning: {start, end}, afternoon: {start, end} } — "Cả ngày" = sáng.start → chiều.end */
 const DEFAULT_SHIFTS = { morning: { start: "08:00", end: "12:00" }, afternoon: { start: "13:00", end: "17:00" } };
 const SHIFT_IDS = ["morning", "afternoon", "full"];
+// Dịch vụ đi kèm của thám tử (dữ liệu cũ chưa tách thì dùng danh sách chung)
+const phAddons = (site, p) => p.addons || site.addons || [];
 // Chụp thêm buổi tối (nối tiếp buổi chiều / cả ngày). Giá 0 = không nhận. Chưa cài: mặc định đến 20:00, 500.000đ
 const eveningOf = site => Object.assign({ end: "20:00", price: 500000 }, site && site.evening);
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -288,9 +294,10 @@ function priceBooking(site, b) {
   if (z.fee) { total += z.fee; lines.push(["Phí đi tỉnh · " + z.short, z.fee]); }
   const nights = z.perNight && !z.quote ? int(b.nights || 0, "Số đêm", 0, 10) : 0;
   if (nights) { total += z.perNight * nights; lines.push([`Lưu trú × ${nights} đêm`, z.perNight * nights]); }
-  let minutes = s.duration;
+  let minutes = 0; // gói không còn thời lượng; chỉ dịch vụ "thêm phút" mới kéo dài buổi chụp
   const pick = (bag, list, label) => { const out = {}; for (const [id, q] of Object.entries(bag || {})) { const it = list.find(x => x.id === id); if (!it) throw new Invalid(`${label} không tồn tại`); const n = int(q, "Số lượng", 0, it.max || 10); if (n) { out[id] = n; total += it.price * n; lines.push([`${it.name} × ${n}`, it.price * n]); if (it.extraMinutes) minutes += it.extraMinutes * n; } } return out; };
-  const addons = pick(b.addons, site.addons, "Dịch vụ"), products = pick(b.products, site.products, "Sản phẩm");
+  if (!p && Object.values(b.addons || {}).some(n => Number(n) > 0)) throw new Invalid("Chọn thám tử để thêm dịch vụ đi kèm");
+  const addons = pick(b.addons, p ? phAddons(site, p) : [], "Dịch vụ"), products = pick(b.products, site.products, "Sản phẩm");
   if (b.time !== "full") { const [st, en] = shiftRange(site.shifts, b.time); if (minutes > en - st) throw new Invalid(`Buổi chụp cần ${Math.ceil(minutes / 60)} tiếng, dài hơn nửa buổi. Chọn “Cả ngày”.`); }
   const deposit = Math.round(total * site.studio.depositPercent / 100 / 1000) * 1000;
   return { service: s, zone: z, photographer: p, evening, eveningEnd: evening ? ev.end : "", nights, addons, products, lines, total, deposit, minutes, needsQuote: !!z.quote };

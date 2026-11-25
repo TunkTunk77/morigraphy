@@ -91,7 +91,9 @@
   let saved = null, draft = null, bookings = [], section = "studio", dirty = false;
 
   async function enterApp(user) {
-    saved = await api("/api/admin/data"); saved.staff ||= []; saved.evening = Object.assign({ end: "20:00", price: 500000 }, saved.evening); draft = clone(saved);
+    saved = await api("/api/admin/data"); saved.staff ||= []; saved.evening = Object.assign({ end: "20:00", price: 500000 }, saved.evening);
+    (saved.photographers || []).forEach(p => { if (!p.addons) p.addons = clone(saved.addons || []); }); // dữ liệu cũ: chép danh sách chung vào từng thám tử
+    draft = clone(saved);
     $("#who").textContent = "Đăng nhập: " + user;
     $("#authView").hidden = true; $("#appView").hidden = false;
     await loadBookings(false);
@@ -104,16 +106,16 @@
 
   /* ---------------- Cấu hình form theo nhóm dữ liệu ---------------- */
   const COLLECTIONS = {
-    services: { title: "Gói chụp", intro: "Giá, thời lượng và nội dung các gói. Gói dài hơn nửa buổi thì khách chỉ chọn được “Cả ngày”.", prefix: "sv",
-      blank: () => ({ name: "Gói mới", category: "Cá nhân", duration: 60, price: 1000000, tone: "stone", desc: "", includes: [] }),
-      side: x => x.priceFull > 0 ? `${money(x.price)} · cả ngày ${money(x.priceFull)}` : money(x.price), sub: x => `${x.category} · ${x.duration} phút`,
-      fields: [["name", "Tên gói", "text"], ["category", "Danh mục", "text"], ["tone", "Màu ảnh giữ chỗ", "tone"], ["price", "Giá nửa ngày (đ)", "money"], ["priceFull", "Giá cả ngày (đ) — 0 là giống nửa ngày", "money"], ["duration", "Thời lượng (phút)", "number"], ["contact", "Hiện nút “Liên hệ team” trên gói", "bool"],
+    services: { title: "Gói chụp", intro: "Giá nửa ngày / cả ngày và nội dung các gói.", prefix: "sv",
+      blank: () => ({ name: "Gói mới", category: "Cá nhân", price: 1000000, tone: "stone", desc: "", includes: [] }),
+      side: x => x.priceFull > 0 ? `${money(x.price)} · cả ngày ${money(x.priceFull)}` : money(x.price), sub: x => x.category,
+      fields: [["name", "Tên gói", "text"], ["category", "Danh mục", "text"], ["tone", "Màu ảnh giữ chỗ", "tone"], ["price", "Giá nửa ngày (đ)", "money"], ["priceFull", "Giá cả ngày (đ) — 0 là giống nửa ngày", "money"], ["contact", "Hiện nút “Liên hệ team” trên gói", "bool"],
         ["desc", "Mô tả ngắn", "textarea", "full"], ["includes", "Bao gồm (mỗi dòng một ý)", "lines", "full"]] },
     photographers: { title: "Thám tử ảnh", intro: "Thông tin thợ, ngày làm việc, các gói nhận chụp và phụ phí khi khách chọn đích danh.", prefix: "ph",
-      blank: () => ({ name: "Thám tử mới", phone: "", role: "Thám tử", years: 1, rating: 5, reviews: 0, surcharge: 0, tone: "stone", specialties: [], style: "", bio: "", workDays: [1, 2, 3, 4, 5, 6], services: [], avatar: "", portfolio: [] }),
-      side: x => (x.surcharge ? "+" + money(x.surcharge) : "Không phụ phí"), sub: x => `${x.role}${x.phone ? " · " + x.phone : ""} · ${x.years} năm · ★ ${x.rating} · ${(x.portfolio || []).length} ảnh portfolio${x.payment && x.payment.enabled ? " · có TK nhận cọc riêng" : ""}`,
+      blank: () => ({ name: "Thám tử mới", phone: "", role: "Thám tử", years: 1, rating: 5, reviews: 0, surcharge: 0, tone: "stone", specialties: [], style: "", bio: "", workDays: [1, 2, 3, 4, 5, 6], services: [], addons: [], avatar: "", portfolio: [] }),
+      side: x => (x.surcharge ? "+" + money(x.surcharge) : "Không phụ phí"), sub: x => `${x.role}${x.phone ? " · " + x.phone : ""} · ${x.years} năm · ★ ${x.rating} · ${(x.portfolio || []).length} ảnh portfolio · ${(x.addons || []).length} dịch vụ đi kèm${x.payment && x.payment.enabled ? " · có TK nhận cọc riêng" : ""}`,
       fields: [["avatar", "Ảnh đại diện", "image"], ["name", "Họ tên", "text"], ["phone", "Số điện thoại / Zalo riêng", "text"], ["role", "Chức danh", "text"], ["years", "Số năm kinh nghiệm", "number"], ["rating", "Điểm đánh giá (0–5)", "decimal"], ["reviews", "Số đánh giá", "number"],
-        ["surcharge", "Phụ phí chọn đích danh (đ)", "money"], ["tone", "Màu dự phòng (khi chưa có ảnh)", "tone"], ["specialties", "Chuyên môn (mỗi dòng một ý)", "lines"], ["workDays", "Ngày làm việc", "days", "full"], ["services", "Nhận chụp các gói", "services", "full"],
+        ["surcharge", "Phụ phí chọn đích danh (đ)", "money"], ["tone", "Màu dự phòng (khi chưa có ảnh)", "tone"], ["specialties", "Chuyên môn (mỗi dòng một ý)", "lines"], ["workDays", "Ngày làm việc", "days", "full"], ["services", "Nhận chụp các gói", "services", "full"], ["addons", "Dịch vụ đi kèm của thám tử này (đồ riêng)", "addonlist", "full"],
         ["style", "Phong cách", "textarea", "full"], ["bio", "Giới thiệu", "textarea", "full"], ["portfolio", "Portfolio — ảnh thám tử đã chụp", "portfolio", "full"], ["payment", "Tài khoản nhận cọc riêng", "bank", "full"]] },
     addons: { title: "Dịch vụ đi kèm", intro: "Khách chọn số lượng ở bước 4. “Thêm phút” cộng vào thời lượng buổi chụp.", prefix: "ad",
       blank: () => ({ name: "Dịch vụ mới", price: 100000, unit: "lần", tone: "stone", desc: "" }),
@@ -133,7 +135,7 @@
     fields: [["name", "Tên", "text"], ["role", "Vai trò", "text"], ["phone", "Số điện thoại / Zalo (chỉ admin thấy)", "text"], ["price", "Giá / buổi (đ) — 0 là miễn phí", "money"], ["tone", "Màu ảnh giữ chỗ", "tone"],
       ["avatar", "Ảnh đại diện", "image", "full"], ["workDays", "Ngày làm việc", "days", "full"], ["bio", "Giới thiệu ngắn (khách thấy)", "textarea", "full"]] };
 
-  const NAV = [["bookings", "Đơn đặt lịch"], ["studio", "Thông tin team"], ["hero", "Trang chủ"], "—", ["services", "Gói chụp"], ["photographers", "Thám tử ảnh"], ["schedule", "Lịch bận thám tử"], ["staff", "Staff take care"], ["addons", "Dịch vụ đi kèm"], ["zones", "Phí chụp ngoài tỉnh"], "—", ["notify", "Thông báo"], ["account", "Tài khoản"]];
+  const NAV = [["bookings", "Đơn đặt lịch"], ["studio", "Thông tin team"], ["hero", "Trang chủ"], "—", ["services", "Gói chụp"], ["photographers", "Thám tử ảnh"], ["schedule", "Lịch bận thám tử"], ["staff", "Staff take care"], ["zones", "Phí chụp ngoài tỉnh"], "—", ["notify", "Thông báo"], ["account", "Tài khoản"]];
   function renderNav() {
     const fresh = bookings.filter(b => b.status === "new").length;
     $("#sidenav").innerHTML = NAV.map(n => n === "—" ? "<hr />" : `<button type="button" data-nav="${n[0]}" ${n[0] === section ? 'aria-current="page"' : ""}>${n[1]}${n[0] === "bookings" && fresh ? `<span class="count">${fresh}</span>` : ""}</button>`).join("");
@@ -179,6 +181,15 @@
             </figure>`).join("")}
             ${list.length < PF_MAX ? `<label class="pf-add"><input type="file" accept="image/jpeg,image/png,image/webp" multiple data-upload="portfolio" data-target="${path}" class="visually-hidden" /><span>+</span>Thêm ảnh<small>JPG · PNG · WebP</small></label>` : ""}
           </div>`, false);
+      }
+      case "addonlist": {
+        const list = val || [];
+        const f = (j, k, lab, type, v, extra = "") => `<label class="adl-f adl-${k}"><span>${lab}</span><input type="${type}" data-path="${path}.${j}.${k}" data-type="${type === "number" ? (k === "max" || k === "extraMinutes" ? "optint" : "int") : "text"}" value="${esc(v ?? "")}" ${extra} /></label>`;
+        return wrap(`<p class="hint" style="margin:0 0 8px">Hiện trong hồ sơ thám tử, dưới phần Chuyên môn. Không tính thêm chi phí.</p>
+          <div class="adl">${list.map((a, j) => `<div class="adl-row">
+            ${f(j, "name", "Tên dịch vụ", "text", a.name)}${f(j, "desc", "Mô tả ngắn", "text", a.desc)}
+            <button type="button" class="icon-btn danger" data-adl-del="${path}:${j}" aria-label="Xóa ${esc(a.name)}">✕</button></div>`).join("")}</div>
+          <button type="button" class="btn btn-ghost btn-sm" data-adl-add="${path}">+ Thêm dịch vụ</button>`, false);
       }
       case "services": return wrap(`<div class="check-row">${draft.services.map(s => `<label class="pill-check"><input type="checkbox" data-path="${path}" data-type="set-str" value="${esc(s.id)}" ${(val || []).includes(s.id) ? "checked" : ""} />${esc(s.name)}</label>`).join("")}</div>`, false);
       default: return wrap(`<input id="${id}" data-path="${path}" data-type="text" type="text" value="${esc(val)}" />`);
@@ -350,7 +361,7 @@
           ${input("hero.folderTone", "Màu tập hồ sơ", "tone", h.folderTone, "half")}
           ${input("hero.photoTone", "Màu ô ảnh (khi chưa có ảnh)", "tone", h.photoTone)}
         </div></div>
-        ${Object.keys(secs).map(k => `<div class="panel"><h2 class="panel-title">Mục “${esc(L[k] || k)}”</h2><div class="form-grid">
+        ${Object.keys(secs).filter(k => L[k]).map(k => `<div class="panel"><h2 class="panel-title">Mục “${esc(L[k] || k)}”</h2><div class="form-grid">
           ${k === "cta"
             ? input(`sections.cta.title`, "Tiêu đề", "text", secs.cta.title, "full") + input(`sections.cta.sub`, "Mô tả", "text", secs.cta.sub, "full") + input(`sections.cta.btn`, "Chữ nút", "text", secs.cta.btn)
             : input(`sections.${k}.eyebrow`, "Dòng nhỏ", "text", secs[k].eyebrow) + input(`sections.${k}.title`, "Tiêu đề", "text", secs[k].title, "half") + input(`sections.${k}.sub`, "Mô tả", "textarea", secs[k].sub, "full")}
@@ -400,7 +411,7 @@
       <div class="bk-list">${list.map(b => `
         <article class="bk">
           <div><span class="code">${esc(b.code)}</span> <span class="status st-${b.status}">${STATUS[b.status]}</span>
-            <span class="when">${esc(b.date.split("-").reverse().join("/"))} · ${esc(SHIFT_NAMES[b.time] || b.time)}${b.evening ? " + tối" : ""}</span><small>${b.minutes} phút · tạo ${new Date(b.createdAt).toLocaleString("vi-VN")}</small></div>
+            <span class="when">${esc(b.date.split("-").reverse().join("/"))} · ${esc(SHIFT_NAMES[b.time] || b.time)}${b.evening ? " + tối" : ""}</span><small>tạo ${new Date(b.createdAt).toLocaleString("vi-VN")}</small></div>
           <div><b>${esc(b.customer.name)}</b> · <a href="tel:${esc(b.customer.phone)}">${esc(b.customer.phone)}</a>${b.customer.instagram ? ` · <a href="https://instagram.com/${encodeURIComponent(b.customer.instagram)}" target="_blank" rel="noopener">IG @${esc(b.customer.instagram)}</a>` : ""}${b.customer.email ? `<small>${esc(b.customer.email)}</small>` : ""}
             <small>${esc(b.serviceName)} · ${esc(b.photographerName)}${b.staffName ? " · Staff: " + esc(b.staffName) : ""}</small>
             <small>${esc(b.zoneName)}${b.address ? " · " + esc(b.address) : ""}${b.nights ? ` · ${b.nights} đêm` : ""}${b.fullDay ? " · khóa trọn ngày" : ""}</small>
@@ -606,6 +617,12 @@
       withUndo(`Đã xóa ảnh “${it.title || "không tên"}” — bấm Lưu để áp dụng`, () => getAt(p).splice(+j, 1));
       return;
     }
+    if (t.dataset.adlAdd) { const list = getAt(t.dataset.adlAdd) || []; if (!getAt(t.dataset.adlAdd)) setAt(t.dataset.adlAdd, list);
+      let id; do { id = "ad-" + Math.random().toString(36).slice(2, 6); } while (list.some(x => x.id === id));
+      list.push({ id, name: "Dịch vụ mới", price: 0, unit: "lần", tone: "stone", desc: "" }); setDirty(true); renderSection();
+      $(`[data-path="${t.dataset.adlAdd}.${list.length - 1}.name"]`)?.focus(); return; }
+    if (t.dataset.adlDel) { const [p, j] = t.dataset.adlDel.split(":"); const it = getAt(p)[+j];
+      withUndo(`Đã xóa “${it.name}” — bấm Lưu để áp dụng`, () => getAt(p).splice(+j, 1)); return; }
     if (t.dataset.clearImg) { setAt(t.dataset.clearImg, ""); setDirty(true); renderSection(); return; }
     if (t.matches("[data-stat-add]")) { draft.hero.stats.push({ value: "", label: "" }); setDirty(true); renderSection(); $(`[data-path="hero.stats.${draft.hero.stats.length - 1}.value"]`)?.focus(); return; }
     if (t.dataset.statDel !== undefined) { const i = +t.dataset.statDel; withUndo("Đã xóa con số — bấm Lưu để áp dụng", () => draft.hero.stats.splice(i, 1)); return; }
