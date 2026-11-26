@@ -143,6 +143,17 @@ textarea{resize:vertical;min-height:62px}
       <label>Chân trang</label><textarea data-k="footer"></textarea>
     </section>
 
+    <section class="card" style="--t:#8FA3BF"><h2>Bot Telegram</h2>
+      <label>Bot token (API)</label><input id="botToken" type="password" autocomplete="off" spellcheck="false" placeholder="123456789:AA...">
+      <label>Chat ID</label><input id="botChat" autocomplete="off" spellcheck="false" placeholder="VD: 123456789 hoặc -100...">
+      <div class="bar">
+        <button class="btn sm" id="bBotSave">Lưu bot</button>
+        <button class="btn sm" id="bBotChat">Tự tìm Chat ID</button>
+        <button class="btn sm" id="bBotTest">Gửi thử</button>
+      </div>
+      <p class="hint">Có token + Chat ID thì hoá đơn gửi thẳng tới bot này. Để trống thì gửi qua bot cài trong Admin → Thông báo. Chỉ lưu trên trình duyệt máy này. Tìm Chat ID: nhắn bất kỳ cho bot trước rồi bấm “Tự tìm Chat ID”.</p>
+    </section>
+
     <section class="card" style="--t:#D8C79F"><h2>Hồ sơ đã lưu</h2>
       <div class="saved" id="saved"></div>
       <p class="hint">Lưu ngay trên trình duyệt của máy này. Đổi máy thì dùng “Xuất file sao lưu”.</p>
@@ -246,10 +257,49 @@ textarea{resize:vertical;min-height:62px}
       if (j >= 0) store.list[j] = copy; else store.list.unshift(copy); persist(); renderSaved(); };
     save();
     if (!changed) return toast("Đã lưu hồ sơ " + inv.code);
-    // báo về bot Telegram (chỉ chạy khi mở trong trang admin đã đăng nhập)
-    try { const r = await fetch("/api/admin/notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "invoice", kind, inv: sum }) });
-      if (!r.ok) throw 0; inv._notified = sig; save(); toast("Đã lưu & báo về bot · " + inv.code);
+    // báo về bot Telegram: có token riêng thì gửi thẳng, không thì qua server (trang admin đã đăng nhập)
+    try { if (bot.token && bot.chat) await tgSend(invoiceText(sum, kind));
+      else { const r = await fetch("/api/admin/notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "invoice", kind, inv: sum }) }); if (!r.ok) throw 0; }
+      inv._notified = sig; save(); toast("Đã lưu & báo về bot · " + inv.code);
     } catch (e) { toast("Đã lưu, nhưng chưa báo được về bot"); } };
+  // ---- Bot Telegram riêng cho app hoá đơn ----
+  const BOT_KEY = "mg-invoice-bot-v1";
+  let bot = { token: "", chat: "" };
+  try { bot = Object.assign(bot, JSON.parse(localStorage.getItem(BOT_KEY)) || {}); } catch (e) {}
+  $("#botToken").value = bot.token; $("#botChat").value = bot.chat;
+  const readBot = () => { bot = { token: $("#botToken").value.trim(), chat: $("#botChat").value.trim() }; try { localStorage.setItem(BOT_KEY, JSON.stringify(bot)); } catch (e) {} };
+  async function tgCall(method, body) {
+    if (!/^\d+:[\w-]{20,}$/.test(bot.token)) throw new Error("Token không đúng dạng");
+    const r = await fetch(`https://api.telegram.org/bot${bot.token}/${method}`, { method: "POST", body: new URLSearchParams(body || {}) }); // dạng form: không cần preflight CORS
+    const j = await r.json().catch(() => ({}));
+    if (!j.ok) throw new Error(j.description || "Telegram từ chối (" + r.status + ")");
+    return j.result;
+  }
+  const tgSend = text => tgCall("sendMessage", { chat_id: bot.chat, text, disable_web_page_preview: true });
+  function invoiceText(v, kind) {
+    const items = v.items.map(it => `  • ${it.n || "(chưa đặt tên)"}${it.q > 1 ? " × " + it.q : ""}: ${money(it.sum)}`);
+    return [
+      `🧾 ${kind === "update" ? "CẬP NHẬT HOÁ ĐƠN" : "HOÁ ĐƠN MỚI"} · ${v.code || "(chưa có mã)"}`,
+      `Khách: ${v.name || "(chưa có tên)"}${v.phone ? " · " + v.phone : ""}${v.ig ? " · IG @" + String(v.ig).replace(/^@/, "") : ""}`,
+      v.pkg ? `Gói: ${v.pkg}` : "",
+      v.date || v.time ? `Ngày: ${[v.date, v.time].filter(Boolean).join(" · ")}` : "",
+      v.ph || v.staff ? `Thám tử: ${v.ph || "—"}${v.staff ? " · Staff: " + v.staff : ""}` : "",
+      v.place ? `Nơi chụp: ${v.place}` : "",
+      items.length ? "Chi tiết:\n" + items.join("\n") : "",
+      v.disc ? `Giảm giá: −${money(v.disc)}` : "",
+      `Tổng: ${money(v.total)} · Cọc: ${money(v.dep)}${v.paidAll ? " · ĐÃ THANH TOÁN ĐỦ" : v.paid ? " · đã nhận cọc" : " · chưa cọc"}`,
+      v.paidAll ? "" : `Còn lại: ${money(v.rest)}`,
+      v.note ? `Ghi chú: ${v.note}` : "",
+    ].filter(Boolean).join("\n").slice(0, 4000);
+  }
+  $("#bBotSave").onclick = () => { readBot(); toast(bot.token ? "Đã lưu bot" : "Đã xoá bot riêng, dùng bot trong Admin"); };
+  $("#bBotChat").onclick = async () => { readBot();
+    try { const ups = await tgCall("getUpdates", {}); const m = ups.reverse().map(u => u.message || u.channel_post || u.my_chat_member).find(x => x && x.chat);
+      if (!m) return toast("Chưa thấy tin nào, nhắn cho bot trước đã");
+      $("#botChat").value = m.chat.id; readBot(); toast("Đã lấy Chat ID: " + m.chat.id);
+    } catch (e) { toast(e.message); } };
+  $("#bBotTest").onclick = async () => { readBot(); if (!bot.token || !bot.chat) return toast("Nhập token và Chat ID trước");
+    try { await tgSend("🔔 Thử bot hoá đơn Mori Graphy: nếu thấy tin này là đã hoạt động."); toast("Đã gửi thử, xem Telegram nhé"); } catch (e) { toast(e.message); } };
   $("#bDup").onclick = () => { inv = Object.assign(JSON.parse(JSON.stringify(inv)), { id: Date.now().toString(36), code: code(), issued: today(), paid: false, paidAll: false, _notified: "" }); fill(); schedule(); toast("Đã nhân bản, mã mới " + inv.code); };
   $("#bExport").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(store.list, null, 1)], { type: "application/json" }));
     a.download = `morigraphy-hoa-don-sao-luu-${today()}.json`; a.click(); };
