@@ -18,6 +18,7 @@ COPY --chown=node:node server ./server
 COPY --chown=node:node js ./js
 COPY --chown=node:node css ./css
 COPY --chown=node:node assets ./assets
+COPY --chown=node:node hoa-don ./hoa-don
 COPY --chown=node:node index.html admin.html ./
 
 # Thư mục dữ liệu: gắn volume vào đây để giữ admin, đơn đặt lịch, ảnh tải lên
