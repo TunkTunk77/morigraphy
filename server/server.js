@@ -520,6 +520,12 @@ async function serveStatic(req, res, pathname, versioned = false) {
   if (rel === "" ) rel = "index.html";
   if (rel === "admin") rel = "admin.html";
   if (rel === "sw.js") rel = "js/sw.js"; // service worker của app quản trị cần nằm ở gốc trang
+  // App làm hoá đơn: chỉ mở khi đã đăng nhập admin (cho phép nhúng trong trang admin cùng origin)
+  if (rel === "admin/hoa-don") {
+    if (!getSession(req)) return send(res, 404, "Not found");
+    const entry = await loadFile(path.join(ROOT, "hoa-don", "index.html"));
+    return send(res, 200, req.method === "HEAD" ? "" : entry.raw, { "Content-Type": "text/html; charset=utf-8", "X-Frame-Options": "SAMEORIGIN" });
+  }
   const top = rel.split("/")[0];
   // Ảnh tải lên: /uploads/<tên-ngẫu-nhiên>.<đuôi> → data/uploads/
   if (top === "uploads") {
@@ -762,6 +768,27 @@ async function adminApi(req, res, p, method) {
       if (!/^https:\/\/[^\s]{10,800}$/.test(String(sb.endpoint || "")) || !sb.keys || !/^[A-Za-z0-9_-]{80,100}$/.test(String(sb.keys.p256dh || "")) || !/^[A-Za-z0-9_-]{16,30}$/.test(String(sb.keys.auth || ""))) return send(res, 400, { error: "Đăng ký thông báo không hợp lệ" });
       await notifier.subscribe({ endpoint: sb.endpoint, keys: { p256dh: sb.keys.p256dh, auth: sb.keys.auth } }, clean(String(b.name || "Thiết bị"), 60));
       return send(res, 200, await notifier.status());
+    }
+    if (b.action === "invoice") { // admin tự làm hoá đơn trong app "Làm hoá đơn" → báo về bot
+      const v = b.inv || {}, t = (x, n) => clean(String(x ?? ""), n), m = x => Math.max(0, Math.min(1e11, Math.round(Number(x) || 0)));
+      const items = (Array.isArray(v.items) ? v.items : []).slice(0, 30).map(it => `  • ${t(it.n, 80)}${m(it.q) > 1 ? " × " + m(it.q) : ""}: ${vnd(m(it.sum))}`);
+      const code = t(v.code, 40) || "(chưa có mã)", name = t(v.name, 80) || "(chưa có tên)";
+      const text = [
+        `🧾 ${b.kind === "update" ? "CẬP NHẬT HOÁ ĐƠN" : "HOÁ ĐƠN MỚI"} · ${code}`,
+        `Khách: ${name}${v.phone ? " · " + t(v.phone, 30) : ""}${v.ig ? " · IG @" + t(v.ig, 40).replace(/^@/, "") : ""}`,
+        v.pkg ? `Gói: ${t(v.pkg, 80)}` : "",
+        v.date || v.time ? `Ngày: ${[t(v.date, 20), t(v.time, 60)].filter(Boolean).join(" · ")}` : "",
+        v.ph || v.staff ? `Thám tử: ${t(v.ph, 60) || "—"}${v.staff ? " · Staff: " + t(v.staff, 60) : ""}` : "",
+        v.place ? `Nơi chụp: ${t(v.place, 120)}` : "",
+        items.length ? "Chi tiết:\n" + items.join("\n") : "",
+        m(v.disc) ? `Giảm giá: −${vnd(m(v.disc))}` : "",
+        `Tổng: ${vnd(m(v.total))} · Cọc: ${vnd(m(v.dep))}${v.paidAll ? " · ĐÃ THANH TOÁN ĐỦ" : v.paid ? " · đã nhận cọc" : " · chưa cọc"}`,
+        v.paidAll ? "" : `Còn lại: ${vnd(m(v.rest))}`,
+        v.note ? `Ghi chú: ${t(v.note, 300)}` : "",
+        `Người làm: ${t(s.user, 40)}`,
+      ].filter(Boolean).join("\n");
+      const r = await notifier.send({ title: `${b.kind === "update" ? "Cập nhật hoá đơn" : "Hoá đơn mới"} ${code}`, body: `${name} · ${vnd(m(v.total))}`, url: "/admin.html#invoice", tag: "hd-" + code, text }, await notifySubject());
+      return send(res, 200, r || { ok: true });
     }
     if (b.action === "unsubscribe") { await notifier.unsubscribe(String(b.id || "")); return send(res, 200, await notifier.status()); }
     if (b.action === "test") {

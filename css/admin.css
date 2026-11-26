@@ -234,3 +234,6 @@ body.admin { background: var(--bg); }
 .adl-f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .adl-f input { width: 100%; }
 @media (max-width: 700px) { .adl-row { grid-template-columns: 1fr auto; } .adl-desc { grid-column: 1 / -1; grid-row: 2; } }
+
+/* App làm hoá đơn nhúng trong admin */
+.invoice-frame { display: block; width: 100%; height: calc(100vh - 170px); min-height: 640px; border: 0; border-radius: 18px; background: #F3ECDD; }

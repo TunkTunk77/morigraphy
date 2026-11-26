@@ -136,7 +136,7 @@
     fields: [["name", "Tên", "text"], ["role", "Vai trò", "text"], ["phone", "Số điện thoại / Zalo (chỉ admin thấy)", "text"], ["price", "Giá / buổi (đ) — 0 là miễn phí", "money"], ["tone", "Màu ảnh giữ chỗ", "tone"],
       ["avatar", "Ảnh đại diện", "image", "full"], ["workDays", "Ngày làm việc", "days", "full"], ["bio", "Giới thiệu ngắn (khách thấy)", "textarea", "full"]] };
 
-  const NAV = [["bookings", "Đơn đặt lịch"], ["studio", "Thông tin team"], ["hero", "Trang chủ"], "—", ["services", "Gói chụp"], ["photographers", "Thám tử ảnh"], ["schedule", "Lịch bận thám tử"], ["staff", "Staff take care"], ["zones", "Phí chụp ngoài tỉnh"], "—", ["notify", "Thông báo"], ["account", "Tài khoản"]];
+  const NAV = [["bookings", "Đơn đặt lịch"], ["invoice", "Làm hoá đơn"], ["studio", "Thông tin team"], ["hero", "Trang chủ"], "—", ["services", "Gói chụp"], ["photographers", "Thám tử ảnh"], ["schedule", "Lịch bận thám tử"], ["staff", "Staff take care"], ["zones", "Phí chụp ngoài tỉnh"], "—", ["notify", "Thông báo"], ["account", "Tài khoản"]];
   function renderNav() {
     const fresh = bookings.filter(b => b.status === "new").length;
     $("#sidenav").innerHTML = NAV.map(n => n === "—" ? "<hr />" : `<button type="button" data-nav="${n[0]}" ${n[0] === section ? 'aria-current="page"' : ""}>${n[1]}${n[0] === "bookings" && fresh ? `<span class="count">${fresh}</span>` : ""}</button>`).join("");
@@ -209,6 +209,7 @@
     if (section === "account") return renderAccount(c);
     if (section === "schedule") return renderSchedule(c);
     if (section === "notify") return renderNotify(c);
+    if (section === "invoice") return renderInvoiceTool(c);
     const cfg = COLLECTIONS[section], list = draft[section];
     const openIds = new Set($$("details.row[open]").map(d => d.dataset.id));
     c.innerHTML = `<div class="page-head"><div><h1>${cfg.title}</h1><p>${cfg.intro}</p></div><button type="button" class="btn btn-primary btn-sm" data-add="${section}">+ Thêm mới</button></div>
@@ -231,6 +232,12 @@
         </details>`).join("") || `<div class="empty">Chưa có mục nào.</div>`}</div>`;
     list.forEach(x => delete x._new);
     updatePayPreview();
+  }
+
+  function renderInvoiceTool(c) {
+    c.innerHTML = `<div class="page-head"><div><h1>Làm hoá đơn</h1><p>Tự làm hoá đơn hồ sơ theo concept, tải ảnh PNG gửi khách. Hồ sơ lưu trên trình duyệt của máy này, không đụng vào đơn đặt lịch.</p></div>
+      <a class="btn btn-sm" href="/admin/hoa-don" target="_blank" rel="noopener">Mở tab riêng ↗</a></div>
+      <iframe class="invoice-frame" src="/admin/hoa-don" title="Làm hoá đơn"></iframe>`;
   }
 
   function renderStudio(c) {
