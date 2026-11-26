@@ -238,7 +238,16 @@
     c.innerHTML = `<div class="page-head"><div><h1>Làm hoá đơn</h1><p>Tự làm hoá đơn hồ sơ theo concept, tải ảnh PNG gửi khách. Hồ sơ lưu trên trình duyệt của máy này, không đụng vào đơn đặt lịch.</p></div>
       <a class="btn btn-sm" href="/admin/hoa-don" target="_blank" rel="noopener">Mở tab riêng ↗</a></div>
       <iframe class="invoice-frame" src="/admin/hoa-don" title="Làm hoá đơn"></iframe>`;
+    fitInvoiceFrame();
+    c.querySelector(".invoice-frame").addEventListener("load", fitInvoiceFrame);
   }
+  // Khung hoá đơn vừa khít phần còn lại của màn hình → trang admin không cuộn, chỉ app bên trong cuộn (1 thanh trượt)
+  function fitInvoiceFrame() {
+    const f = document.querySelector(".invoice-frame"); if (!f) return;
+    const top = f.getBoundingClientRect().top + window.scrollY;
+    f.style.height = Math.max(420, window.innerHeight - top - 16) + "px";
+  }
+  window.addEventListener("resize", fitInvoiceFrame);
 
   function renderStudio(c) {
     const s = draft.studio;

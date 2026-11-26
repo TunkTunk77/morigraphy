@@ -236,4 +236,5 @@ body.admin { background: var(--bg); }
 @media (max-width: 700px) { .adl-row { grid-template-columns: 1fr auto; } .adl-desc { grid-column: 1 / -1; grid-row: 2; } }
 
 /* App làm hoá đơn nhúng trong admin */
-.invoice-frame { display: block; width: 100%; height: calc(100vh - 170px); min-height: 640px; border: 0; border-radius: 18px; background: #F3ECDD; }
+.invoice-frame { display: block; width: 100%; height: calc(100vh - 220px); min-height: 420px; border: 0; border-radius: 18px; background: #F3ECDD; }
+.content:has(.invoice-frame) { padding-bottom: 0; }
